@@ -1,0 +1,12 @@
+[package]
+name = "BegoneBot"
+version = "0.1.0"
+authors = ["random_person_001 <rileylegos6@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serenity = {version="0.10.2", features = ["framework", "standard_framework", "rustls_backend"]}
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+rusqlite = {version="0.24.2", features=["bundled"]}
