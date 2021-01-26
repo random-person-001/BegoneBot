@@ -4,7 +4,7 @@ use sqlx::{query_as_with, sqlx_macros, Result, Sqlite};
 use std::convert::TryInto;
 
 /// What to do to noobs when shit hits the fan (autopanic on)
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Action {
     Ban,
     Kick,
@@ -48,7 +48,7 @@ impl RawSettings {
             users: self.users.try_into().unwrap(),
             time: self.time.try_into().unwrap(),
             logs: self.logs.try_into().unwrap(),
-            muteroll: self.logs.try_into().unwrap(),
+            muteroll: self.muteroll.try_into().unwrap(),
         }
     }
 }
@@ -85,6 +85,14 @@ impl MyDbContext {
 
     pub async fn add_guild(&mut self, guild_id: u64) -> bool {
         self.add_guild_table().await;
+        match sqlx::query("DELETE FROM settings WHERE guild=?1;")
+            .bind(guild_id)
+            .execute(&self.pool)
+            .await
+        {
+            Ok(_) => (),
+            Err(_) => (),
+        }
         match sqlx::query("INSERT INTO settings (guild) VALUES (?1);")
             .bind(guild_id)
             .execute(&self.pool)
@@ -95,7 +103,7 @@ impl MyDbContext {
         }
     }
 
-    pub async fn fetch_settings(&mut self, guild_id: u64) -> Option<Settings> {
+    pub async fn fetch_settings(&mut self, guild_id: &u64) -> Option<Settings> {
         let r: Result<RawSettings> = sqlx::query_as("SELECT * FROM settings WHERE guild = ?;")
             .bind(guild_id)
             .fetch_one(&self.pool)
@@ -178,7 +186,7 @@ impl MyDbContext {
         }
     }
 
-    pub async fn set_action(&mut self, guild: u64, action: Action) -> bool {
+    pub async fn set_action(&mut self, guild: u64, action: &Action) -> bool {
         let action: i32 = match action {
             Action::Ban => 0,
             Action::Kick => 1,

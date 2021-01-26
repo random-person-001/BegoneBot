@@ -3,6 +3,7 @@ use serenity::framework::standard::CommandResult;
 use serenity::prelude::Context;
 use std::convert::TryInto;
 
+use serenity::model::channel::GuildChannel;
 use serenity::{
     async_trait,
     client::bridge::gateway::{ShardId, ShardManager},
@@ -22,18 +23,17 @@ use serenity::{
     },
     utils::{content_safe, ContentSafeOptions},
 };
-use serenity::model::channel::GuildChannel;
 /*
 ? / help      display help
-on/off        enable/disable auto panic
-current       display current settings
-users <#>     User joins needed to trigger AP
-time <#>      time window to trigger AP
-action        choose whether to ban, kick, or mute upon AP
+.on/off        enable/disable auto panic
+.current       display current settings
+.users <#>     User joins needed to trigger AP
+.time <#>      time window to trigger AP
+.action        choose whether to ban, kick, or mute upon AP
 now           turns on panic mode immediately
 stop          turns off panic mode immediately
 muteroll @r   sets @r to be the roll applied automatically to noobs during panic when action=mute
-logs #chan    sets #chan to be where logs occur
+.logs #chan    sets #chan to be where logs occur
 
 **later**
 
@@ -70,10 +70,10 @@ async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         Some(id) => id.0.try_into().unwrap(),
         None => 0,
     };
-    match &choice[..] {
-        "ban" => dbcontext.set_action(guild, Action::Ban).await,
-        "kick" => dbcontext.set_action(guild, Action::Kick).await,
-        "mute" => dbcontext.set_action(guild, Action::Mute).await,
+    let choice = match &choice[..] {
+        "ban" => Action::Ban,
+        "kick" => Action::Kick,
+        "mute" => Action::Mute,
         default => {
             msg.channel_id
                 .say(
@@ -81,17 +81,39 @@ async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                     "Sorry that wasn't recognized.  Recognized options are ban, kick, or mute",
                 )
                 .await?;
-            false
+            return Ok(());
         }
     };
+    dbcontext.set_action(guild, &choice).await;
+
     msg.channel_id.say(&ctx.http, "Updated.").await?;
+    if let Some(settings) = dbcontext.fetch_settings(&guild).await {
+        assert_eq!(&choice, &Action::Mute);
+        if &choice == &Action::Mute && settings.muteroll == 0 {
+            let mut roll: u64 = 0;
+            if let Some(rol) = get_roll_id_by_name(&ctx, &msg, "muted").await {
+                roll = rol;
+            } else if let Some(rol) = get_roll_id_by_name(&ctx, &msg, "Muted").await {
+                roll = rol;
+            }
+
+            if roll > 0 {
+                let s = "Automatically detected the Muted roll here";
+                msg.channel_id.say(&ctx.http, s).await?;
+                dbcontext.set_muteroll(guild.clone(), roll).await;
+            } else {
+                let s = "Please specify which roll to give members to mute them by running antiraid setmuteroll @thatroll. Until then I cannot help you in a raid.";
+                msg.channel_id.say(&ctx.http, s).await?;
+            }
+        }
+    } else {
+        println!("uh no settings found");
+    }
     Ok(())
 }
 
-
 #[command]
 async fn reset(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let choice = args.clone().single::<String>().unwrap().to_lowercase();
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
@@ -107,7 +129,7 @@ async fn reset(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             .await?;
     } else {
         let s = "Problems were encountered while attempting to reset settings";
-        msg.channel_id .say(   &ctx.http,s).await?;
+        msg.channel_id.say(&ctx.http, s).await?;
     }
     Ok(())
 }
@@ -123,14 +145,14 @@ async fn current(ctx: &Context, msg: &Message, mut _args: Args) -> CommandResult
         None => 0,
     };
 
-    let settings = dbcontext.fetch_settings(guild).await;
+    let settings = dbcontext.fetch_settings(&guild).await;
     let settings = settings.unwrap();
 
     let s = format!(
         r#"**Current antiraid settings**
     Automatic raid detection is currently {}
     Panic mode is triggered when {} users join in {} seconds.
-    During panic mode, any member joining will be {}.
+    During panic mode, any member joining will be {}
     {}.
     "#,
         if let 0 = settings.enabled {
@@ -141,9 +163,15 @@ async fn current(ctx: &Context, msg: &Message, mut _args: Args) -> CommandResult
         settings.users,
         settings.time,
         match settings.action {
-            Action::Ban => "banned",
-            Action::Kick => "kicked",
-            Action::Mute => "muted",
+            Action::Ban => String::from("banned"),
+            Action::Kick => String::from("kicked"),
+            Action::Mute => {
+                if settings.muteroll == 0 {
+                    String::from("muted.\n    **PLEASE TELL ME WHAT ROLL TO GIVE PEOPLE TO MUTE THEM** - run `autopanic setmuteroll @theroll`")
+                } else {
+                    format!("muted (given <@&{}>)", settings.muteroll)
+                }
+            }
         },
         if let 0 = settings.logs {
             String::from("No logging channel is configured")
@@ -193,7 +221,6 @@ async fn users(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     }
 }
 
-
 #[command]
 async fn time(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
@@ -228,11 +255,6 @@ async fn time(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     }
 }
 
-fn chan_str_to_id(s: &str) -> Option<u64> {
-    // todo: this
-    Some(0)
-}
-
 #[command]
 async fn logs(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
@@ -244,12 +266,12 @@ async fn logs(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         None => 0,
     };
     let choice = args.clone().single::<String>().unwrap();
-    let choice = match chan_str_to_id(&choice[..]) {
+    let choice = match id_from_mention(&choice[..]) {
         Some(id) => id,
         None => {
             let s = "Bro that didn't look like a normal channel message :(";
-            msg.channel_id .say(&ctx.http, s).await?;
-            return Ok(())
+            msg.channel_id.say(&ctx.http, s).await?;
+            return Ok(());
         }
     };
 
@@ -262,4 +284,129 @@ async fn logs(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             .await?;
         Ok(())
     }
+}
+
+#[command]
+async fn setmuteroll(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let mut data = ctx.data.write().await;
+    let mut dbcontext = data
+        .get_mut::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+    let guild: u64 = match msg.guild_id {
+        Some(id) => id.0.try_into().unwrap(),
+        None => 0,
+    };
+    let choice = args.clone().single::<String>().unwrap();
+
+    let roll: u64;
+    if let Some(rol) = get_roll_id_by_name(&ctx, &msg, &choice[..]).await {
+        roll = rol;
+    } else if let Some(rol) = get_roll_id_by_name(&ctx, &msg, &choice.to_lowercase()[..]).await {
+        roll = rol;
+    } else if let Some(rol) = id_from_mention(&choice[..]) {
+        roll = rol;
+    } else {
+        let s = "Broski that didn't look like a roll that you have here :(";
+        msg.channel_id.say(&ctx.http, s).await?;
+        return Ok(());
+    };
+
+    if dbcontext.set_muteroll(guild, roll).await {
+        msg.channel_id.say(&ctx.http, "Updated.").await?;
+        Ok(())
+    } else {
+        let s = "Problems arose when trying to update settings.";
+        msg.channel_id.say(&ctx.http, s).await?;
+        Ok(())
+    }
+}
+
+#[command]
+async fn enable(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+    let mut data = ctx.data.write().await;
+    let mut dbcontext = data
+        .get_mut::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+    let guild: u64 = match msg.guild_id {
+        Some(id) => id.0.try_into().unwrap(),
+        None => 0,
+    };
+    if dbcontext.set_enabled(guild, true).await {
+        msg.channel_id.say(&ctx.http, "Updated.").await?;
+        Ok(())
+    } else {
+        msg.channel_id
+            .say(&ctx.http, "Problems arose when trying to update settings.")
+            .await?;
+        Ok(())
+    }
+}
+#[command]
+async fn disable(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+    let mut data = ctx.data.write().await;
+    let mut dbcontext = data
+        .get_mut::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+    let guild: u64 = match msg.guild_id {
+        Some(id) => id.0.try_into().unwrap(),
+        None => 0,
+    };
+    if dbcontext.set_enabled(guild, false).await {
+        msg.channel_id.say(&ctx.http, "Updated.").await?;
+        Ok(())
+    } else {
+        msg.channel_id
+            .say(&ctx.http, "Problems arose when trying to update settings.")
+            .await?;
+        Ok(())
+    }
+}
+
+/// Retrieves the nth `char` of a `&str`
+/// If `n < 0` then it will always retrieve the final `char`
+/// If you attempt to index out of bounds, it will return a ` `
+fn nth_char(s: &str, n: isize) -> char {
+    if n < 0 {
+        return match s.chars().last() {
+            Some(c) => c,
+            None => ' ',
+        };
+    };
+    match s.chars().nth(n.try_into().unwrap()) {
+        Some(c) => c,
+        None => ' ',
+    }
+}
+
+/// Extract a discord ID (`u64`) from a word that is a discord mention
+/// This could be like a channel <#numbers>, a user <@numbers>, or a roll <@&numbers>
+fn id_from_mention(s: &str) -> Option<u64> {
+    println!("{}", s);
+    if nth_char(&s, 0) != '<' && nth_char(&s, -1) != '>' {
+        // todo: work if just a str id is inputted as well
+        return None;
+    }
+    let num: &str;
+    if nth_char(&s, 2) == '!' || nth_char(&s, 2) == '&' {
+        // latter case is for roll mentions
+        num = &s[3..s.len() - 1];
+    } else {
+        num = &s[2..s.len() - 1];
+    }
+
+    match num.parse::<u64>() {
+        Ok(num) => Some(num),
+        Err(_) => None,
+    }
+}
+
+async fn get_roll_id_by_name(ctx: &Context, msg: &Message, name: &str) -> Option<u64> {
+    if let Some(guild_id) = msg.guild_id {
+        if let Some(guild) = guild_id.to_guild_cached(&ctx).await {
+            if let Some(role) = guild.role_by_name(name) {
+                return Some(role.id.0);
+            }
+        }
+    }
+    None
 }
