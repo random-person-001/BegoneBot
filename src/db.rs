@@ -1,6 +1,6 @@
-use sqlx;
-use sqlx::{query_as_with, sqlx_macros, Sqlite, Result};
 use serenity::model::application::MembershipState::Accepted;
+use sqlx;
+use sqlx::{query_as_with, sqlx_macros, Result, Sqlite};
 use std::convert::TryInto;
 
 /// What to do to noobs when shit hits the fan (autopanic on)
@@ -12,14 +12,14 @@ pub enum Action {
 }
 
 /// Per-guild settings (aka a full row in the sql table, but with dif types)
-#[derive(Debug)]
 pub struct Settings {
-    guild: u64,
-    enabled: u8,
-    action: Action,
-    users: u32,
-    time: i32,
-    logs: u32,
+    pub guild: u64,
+    pub enabled: u8,
+    pub action: Action,
+    pub users: u8,
+    pub time: u32,
+    pub logs: u64,
+    pub muteroll: u64,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -29,12 +29,13 @@ struct RawSettings {
     action: i32,
     users: i32,
     time: i32,
-    logs: i32,
+    logs: u64,
+    muteroll: u64,
 }
 
 impl RawSettings {
     fn betterify(&self) -> Settings {
-        let enum_action = match self.action {
+        let enum_action = match &self.action {
             0 => Action::Ban,
             1 => Action::Kick,
             2 => Action::Mute,
@@ -45,8 +46,9 @@ impl RawSettings {
             enabled: self.enabled.try_into().unwrap(),
             action: enum_action,
             users: self.users.try_into().unwrap(),
-            time: self.time.clone(),
+            time: self.time.try_into().unwrap(),
             logs: self.logs.try_into().unwrap(),
+            muteroll: self.logs.try_into().unwrap(),
         }
     }
 }
@@ -69,39 +71,50 @@ impl MyDbContext {
                 action INTEGER DEFAULT 1,
                 users INTEGER DEFAULT 5,
                 time INTEGER DEFAULT 25,
-                logs INTEGER DEFAULT 0);
+                logs INTEGER DEFAULT 0,
+                muteroll INTEGER DEFAULT 0);
             ";
         match sqlx::query(q).execute(&self.pool).await {
             Ok(_) => true,
-            Err(_) => false,
+            Err(why) => {
+                println!("Encountered error creating settings db: {:?}", why);
+                false
+            }
         }
     }
 
-    pub async fn add_guild(&mut self, guild_id: u64) -> bool{
-        self.add_guild_table();
+    pub async fn add_guild(&mut self, guild_id: u64) -> bool {
+        self.add_guild_table().await;
         match sqlx::query("INSERT INTO settings (guild) VALUES (?1);")
             .bind(guild_id)
             .execute(&self.pool)
-            .await {
+            .await
+        {
             Ok(_) => true,
             Err(_) => false,
         }
     }
 
-    pub async fn fetch_settings(&mut self, guild_id: u64) -> Option<RawSettings> {
+    pub async fn fetch_settings(&mut self, guild_id: u64) -> Option<Settings> {
         let r: Result<RawSettings> = sqlx::query_as("SELECT * FROM settings WHERE guild = ?;")
             .bind(guild_id)
             .fetch_one(&self.pool)
             .await;
         let s = match r {
             Ok(raw_settings) => Some(raw_settings),
-            Err(msg) => {println!("Something went wrong getting settings:"); None}
+            Err(msg) => {
+                println!("Something went wrong getting settings:");
+                None
+            }
         };
         println!("{:?}", s);
-        s
+        match s {
+            Some(s) => Some(s.betterify()),
+            None => None,
+        }
     }
 
-    pub async fn set_enabled(&mut self, guild: u64, enabled: bool) -> bool{
+    pub async fn set_enabled(&mut self, guild: u64, enabled: bool) -> bool {
         let enabled: i32 = match enabled {
             true => 1,
             false => 0,
@@ -110,36 +123,63 @@ impl MyDbContext {
             .bind(enabled)
             .bind(guild)
             .execute(&self.pool)
-            .await {
+            .await
+        {
             Ok(_) => true,
             Err(_) => false,
         }
     }
 
-    pub async fn set_users(&mut self, guild: u64, users: i32) -> bool {
+    pub async fn set_users(&mut self, guild: u64, users: u8) -> bool {
         match sqlx::query("UPDATE settings SET users = ?1 WHERE guild = ?2")
             .bind(users)
             .bind(guild)
             .execute(&self.pool)
-            .await {
+            .await
+        {
             Ok(_) => true,
             Err(_) => false,
         }
     }
 
-    pub async fn set_time(&mut self, guild: u64, time: i32) -> bool {
+    pub async fn set_time(&mut self, guild: u64, time: u32) -> bool {
         match sqlx::query("UPDATE settings SET time = ?1 WHERE guild = ?2")
             .bind(time)
             .bind(guild)
             .execute(&self.pool)
-            .await {
+            .await
+        {
             Ok(_) => true,
             Err(_) => false,
         }
     }
 
-    pub async fn set_action(&mut self, guild: u64, action: Action) -> bool{
-        let action:i32 = match action {
+    pub async fn set_muteroll(&mut self, guild: u64, muteroll: u64) -> bool {
+        match sqlx::query("UPDATE settings SET muteroll = ?1 WHERE guild = ?2")
+            .bind(muteroll)
+            .bind(guild)
+            .execute(&self.pool)
+            .await
+        {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    pub async fn set_logs(&mut self, guild: u64, logs: u64) -> bool {
+        match sqlx::query("UPDATE settings SET logs = ?1 WHERE guild = ?2")
+            .bind(logs)
+            .bind(guild)
+            .execute(&self.pool)
+            .await
+        {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    pub async fn set_action(&mut self, guild: u64, action: Action) -> bool {
+        let action: i32 = match action {
             Action::Ban => 0,
             Action::Kick => 1,
             Action::Mute => 2,
@@ -148,7 +188,8 @@ impl MyDbContext {
             .bind(action)
             .bind(guild)
             .execute(&self.pool)
-            .await {
+            .await
+        {
             Ok(_) => true,
             Err(_) => false,
         }
