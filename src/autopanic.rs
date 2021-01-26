@@ -1,7 +1,7 @@
-use rusqlite::Connection;
 use crate::db::{MyDbContext, Settings, Action};
 use serenity::prelude::Context;
 use serenity::framework::standard::CommandResult;
+use std::convert::TryInto;
 
 use serenity::{
     async_trait,
@@ -47,29 +47,28 @@ fn on_user_join(&state, &user) {
 async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let choice =  args.clone().single::<String>().unwrap().to_lowercase();
     let mut data = ctx.data.write().await;
+    let guild:u64 = match msg.guild_id {
+        Some(id) => {
+            println!("{:?}", id);
+            println!("{:?}", id.0);
+            id.0.try_into().unwrap()
+        },
+        None => 0,
+    };
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     match &choice[..] {
-        "ban" => dbcontext.set_action(msg.guild_id.0, Action::Ban),
-        "kick" => dbcontext.set_action(msg.guild_id.0, Action::Kick),
-        "mute" => dbcontext.set_action(msg.guild_id.0, Action::Mute),
+        "ban" => dbcontext.set_action(guild, Action::Ban).await,
+        "kick" => dbcontext.set_action(guild, Action::Kick).await,
+        "mute" => dbcontext.set_action(guild, Action::Mute).await,
         default => {
             msg.channel_id.say(&ctx.http, "Sorry that wasn't recognized.  Recognized options are ban, kick, or mute").await?;
+            false
         },
-    }
+    };
     msg.channel_id.say(&ctx.http, "Updated.").await?;
     Ok(())
 }
 
 
-// plan:
-
-pub fn main() {
-    let conn = Connection::open(":memory:").unwrap();
-    let mut context = MyDbContext::new(&conn);
-    context.add_guild(9);
-    let s = context.fetch_settings(9);
-    println!("{:?}", s);
-    panic!["Yeet done"];
-}
