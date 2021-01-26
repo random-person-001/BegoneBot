@@ -24,6 +24,13 @@ use serenity::{
     utils::{content_safe, ContentSafeOptions},
 };
 /*
+
+Next steps:
+  transient states
+   - make the bot know when it's panicking and have a list of members joining and stuff,
+   - make bot have temp copy of settings that's kept up to date
+   - print to stdout whenever db query fails
+
 ? / help      display help
 .on/off        enable/disable auto panic
 .current       display current settings
@@ -32,7 +39,7 @@ use serenity::{
 .action        choose whether to ban, kick, or mute upon AP
 now           turns on panic mode immediately
 stop          turns off panic mode immediately
-muteroll @r   sets @r to be the roll applied automatically to noobs during panic when action=mute
+.muteroll @r   sets @r to be the roll applied automatically to noobs during panic when action=mute
 .logs #chan    sets #chan to be where logs occur
 
 **later**
