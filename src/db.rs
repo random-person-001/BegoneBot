@@ -61,6 +61,7 @@ pub struct Settings {
     pub anymentions: u8,
     pub mentionaction: Action,
     pub mentiontime: u32,
+    pub notify: u64, // who to ping in logs when stuff goes down
 }
 
 
@@ -79,6 +80,7 @@ struct RawSettings {
     anymentions: i32,
     mentionaction: i32,
     mentiontime: i32,
+    notify: u64,
 }
 
 impl RawSettings {
@@ -115,13 +117,14 @@ impl RawSettings {
             anymentions: self.anymentions.try_into().unwrap(),
             mentionaction: enum_mentionaction,
             mentiontime: self.mentiontime.try_into().unwrap(),
+            notify: self.notify.try_into().unwrap(),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct MyDbContext {
-    pub pool: sqlx::SqlitePool,
+    pool: sqlx::SqlitePool,
     pub cache: HashMap<u64, Settings>,
 }
 
@@ -144,7 +147,8 @@ impl MyDbContext {
                 usermentions INTEGER DEFAULT 6,
                 anymentions INTEGER DEFAULT 8,
                 mentionaction INTEGER DEFAULT 1,
-                mentiontime INTEGER DEFAULT 5
+                mentiontime INTEGER DEFAULT 5,
+                notify INTEGER DEFAULT 0
                 );
             ";
         match sqlx::query(q).execute(&self.pool).await {
@@ -247,6 +251,7 @@ impl MyDbContext {
                     "anymentions" => settings.anymentions = value.try_into().unwrap(),
                     "mentiontime" => settings.mentiontime = value.try_into().unwrap(),
                     "mentionaction" => settings.mentionaction = value.try_into().unwrap(),
+                    "notify" => settings.notify = value.try_into().unwrap(),
                     s => {
                         println!("Broski I couldn't update the cached settings cuz {} wasn't in there", s);
                         return false

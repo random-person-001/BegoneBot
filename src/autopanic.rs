@@ -165,7 +165,7 @@ async fn current(ctx: &Context, msg: &Message, mut _args: Args) -> CommandResult
         r#"**Automatic antiraid settings**
     Automatic raid detection is currently __{}__
     Panic mode is automatically triggered when __{}__ users join in __{}__ seconds.
-    During panic mode,
+    During panic mode:
       - server verification level will be turned to Highest (verified phone required to join)
       - any member joining will be {}
 
@@ -195,7 +195,7 @@ async fn current(ctx: &Context, msg: &Message, mut _args: Args) -> CommandResult
         if Action::Nothing == settings.mentionaction {
             String::from("__disabled__")
         } else {
-            format!("__enabled__:\n      Members will be __{}__ if they ping __{}__ users, __{}__ mentions, or __{}__ of either within __{}__ seconds", match settings.mentionaction {
+            format!("__enabled__:\n      - Members will be __{}__ if they ping __{}__ users, __{}__ mentions, or __{}__ of either within __{}__ seconds", match settings.mentionaction {
                 Action::Ban => "banned",
                 Action::Kick => "kicked",
                 Action::Mute => "muted",
@@ -205,7 +205,10 @@ async fn current(ctx: &Context, msg: &Message, mut _args: Args) -> CommandResult
         if let 0 = settings.logs {
             String::from("__No__ logging channel is configured")
         } else {
-            format!("Logs are posted in __<#{}>__", settings.logs)
+            format!("Logs are posted in __<#{}>__ \n    __{}__ is pinged when a raid is detected", settings.logs, match settings.notify{
+                0 => String::from("no roll"),
+                n => format!("<@&{}>", n)
+            })
         }
     );
 
