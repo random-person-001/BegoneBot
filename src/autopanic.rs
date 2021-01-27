@@ -148,7 +148,7 @@ async fn reset(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 }
 
 #[command]
-async fn current(ctx: &Context, msg: &Message, mut _args: Args) -> CommandResult {
+async fn current(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()

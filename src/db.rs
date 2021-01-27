@@ -70,7 +70,7 @@ pub struct Settings {
 struct RawSettings {
     guild: u64,
     enabled: i32,
-    action: i32,
+    action: i64,
     users: i32,
     time: i32,
     logs: u64,
@@ -78,46 +78,32 @@ struct RawSettings {
     rollmentions: i32,
     usermentions: i32,
     anymentions: i32,
-    mentionaction: i32,
+    mentionaction: i64,
     mentiontime: i32,
     notify: u64,
 }
 
-impl RawSettings {
-    fn betterify(&self) -> Settings {
-        let enum_action = match &self.action {
-            0 => Action::Ban,
-            1 => Action::Kick,
-            2 => Action::Mute,
-            3 => Action::Nothing,
-            _default => Action::Kick,
-        };
-        let enum_mentionaction = match &self.mentionaction {
-            0 => Action::Ban,
-            1 => Action::Kick,
-            2 => Action::Mute,
-            3 => Action::Nothing,
-            _default => Action::Kick,
-        };
+impl From<RawSettings> for Settings {
+    fn from(s: RawSettings) -> Self {
         Settings {
-            guild: self.guild.try_into().unwrap(),
+            guild: s.guild.try_into().unwrap(),
             enabled: {
-                match self.enabled {
+                match s.enabled {
                     0 => false,
                     _ => true,
                 }
             },
-            action: enum_action,
-            users: self.users.try_into().unwrap(),
-            time: self.time.try_into().unwrap(),
-            logs: self.logs.try_into().unwrap(),
-            muteroll: self.muteroll.try_into().unwrap(),
-            rollmentions: self.rollmentions.try_into().unwrap(),
-            usermentions: self.usermentions.try_into().unwrap(),
-            anymentions: self.anymentions.try_into().unwrap(),
-            mentionaction: enum_mentionaction,
-            mentiontime: self.mentiontime.try_into().unwrap(),
-            notify: self.notify.try_into().unwrap(),
+            action: s.action.try_into().unwrap(),
+            users: s.users.try_into().unwrap(),
+            time: s.time.try_into().unwrap(),
+            logs: s.logs.try_into().unwrap(),
+            muteroll: s.muteroll.try_into().unwrap(),
+            rollmentions: s.rollmentions.try_into().unwrap(),
+            usermentions: s.usermentions.try_into().unwrap(),
+            anymentions: s.anymentions.try_into().unwrap(),
+            mentionaction: s.mentionaction.try_into().unwrap(),
+            mentiontime: s.mentiontime.try_into().unwrap(),
+            notify: s.notify.try_into().unwrap(),
         }
     }
 }
@@ -201,7 +187,7 @@ impl MyDbContext {
         };
         println!("{:?}", s);
         match s {
-            Some(s) => Some(s.betterify()),
+            Some(s) => Some(s.try_into().unwrap()),
             None => None,
         }
     }

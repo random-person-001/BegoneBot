@@ -59,7 +59,19 @@ impl EventHandler for Handler {
         println!("{} is connected!", ready.user.name);
     }
 
-    async fn guild_create(&self, _: Context, guild: Guild, is_new: bool) {}
+    async fn guild_create(&self, ctx: Context, guild: Guild, is_new: bool) {
+        let mut data = ctx.data.write().await;
+        let mut dbcontext = data
+            .get_mut::<MyDbContext>()
+            .expect("Expected MyDbContext in TypeMap.");
+        let id = &guild.id.0;
+        if let Some(s) = dbcontext.fetch_settings(id).await {
+            dbcontext.cache.insert(*id, s);
+        } else {
+            println!("Creating a new settings row for guild {}", id);
+            dbcontext.add_guild(id).await;
+        };
+    }
 }
 
 #[group]
@@ -242,10 +254,6 @@ fn _dispatch_error_no_macro<'fut>(
 
 #[tokio::main]
 async fn main() {
-    let url = String::from("db.sqlite");
-    let pool = sqlx::SqlitePool::connect(&url).await.expect("foo");
-
-    println!("{:?}", pool);
     // Configure the client with your Discord bot token in the environment.
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
