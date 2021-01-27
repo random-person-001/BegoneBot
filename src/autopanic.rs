@@ -42,10 +42,16 @@ stop          turns off panic mode immediately
 .muteroll @r   sets @r to be the roll applied automatically to noobs during panic when action=mute
 .logs #chan    sets #chan to be where logs occur
 
+- Dm autokicked/banned people with message like "we currently do not allow new people in the server because we are being raided, try again later", or something like that.
+
+- ability to get detailed and specific userinfo even if person isn't in the server (like avatar, username)
+
 **later**
+roll/user/any mention spam limit
 
 blacklist     automatically apply `action` to any new join at any time if they have a bad -
- name         username
+ name simple  username
+ name regex   username
  avatar       pfp
  message      message content
 
@@ -81,6 +87,7 @@ async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         "ban" => Action::Ban,
         "kick" => Action::Kick,
         "mute" => Action::Mute,
+        "nothing" => Action::Nothing,
         default => {
             msg.channel_id
                 .say(
@@ -91,11 +98,10 @@ async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             return Ok(());
         }
     };
-    dbcontext.set_action(guild, &choice).await;
+    dbcontext.set_attr(&guild, "action", choice.try_into().unwrap()).await;
 
     msg.channel_id.say(&ctx.http, "Updated.").await?;
     if let Some(settings) = dbcontext.fetch_settings(&guild).await {
-        assert_eq!(&choice, &Action::Mute);
         if &choice == &Action::Mute && settings.muteroll == 0 {
             let mut roll: u64 = 0;
             if let Some(rol) = get_roll_id_by_name(&ctx, &msg, "muted").await {
@@ -107,7 +113,7 @@ async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             if roll > 0 {
                 let s = "Automatically detected the Muted roll here";
                 msg.channel_id.say(&ctx.http, s).await?;
-                dbcontext.set_muteroll(guild.clone(), roll).await;
+                dbcontext.set_attr(&guild, "muteroll", roll.try_into().unwrap()).await;
             } else {
                 let s = "Please specify which roll to give members to mute them by running antiraid setmuteroll @thatroll. Until then I cannot help you in a raid.";
                 msg.channel_id.say(&ctx.http, s).await?;
@@ -130,7 +136,7 @@ async fn reset(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         None => 0,
     };
 
-    if dbcontext.add_guild(guild).await {
+    if dbcontext.add_guild(&guild).await {
         msg.channel_id
             .say(&ctx.http, "Successfully reset settings")
             .await?;
@@ -156,13 +162,18 @@ async fn current(ctx: &Context, msg: &Message, mut _args: Args) -> CommandResult
     let settings = settings.unwrap();
 
     let s = format!(
-        r#"**Current antiraid settings**
-    Automatic raid detection is currently {}
-    Panic mode is triggered when {} users join in {} seconds.
-    During panic mode, any member joining will be {}
+        r#"**Automatic antiraid settings**
+    Automatic raid detection is currently __{}__
+    Panic mode is automatically triggered when __{}__ users join in __{}__ seconds.
+    During panic mode,
+      - server verification level will be turned to Highest (verified phone required to join)
+      - any member joining will be {}
+
+    **General settings**
+    Ping spam limits are {}.
     {}.
     "#,
-        if let 0 = settings.enabled {
+        if settings.enabled {
             "**DISABLED!**"
         } else {
             "ENABLED."
@@ -170,20 +181,31 @@ async fn current(ctx: &Context, msg: &Message, mut _args: Args) -> CommandResult
         settings.users,
         settings.time,
         match settings.action {
-            Action::Ban => String::from("banned"),
-            Action::Kick => String::from("kicked"),
+            Action::Ban => String::from("dmed an explanation and __banned__."),
+            Action::Kick => String::from("dmed an explanation and __kicked__."),
             Action::Mute => {
                 if settings.muteroll == 0 {
-                    String::from("muted.\n    **PLEASE TELL ME WHAT ROLL TO GIVE PEOPLE TO MUTE THEM** - run `autopanic setmuteroll @theroll`")
+                    String::from("dmed an explanation and __muted.__\n    **PLEASE TELL ME WHAT ROLL TO GIVE PEOPLE TO MUTE THEM** - run `autopanic setmuteroll @theroll`")
                 } else {
-                    format!("muted (given <@&{}>)", settings.muteroll)
+                    format!("__muted__ (given __<@&{}>__)", settings.muteroll)
                 }
-            }
+            },
+            Action::Nothing => String::from("__left alone__ by me"),
+        },
+        if Action::Nothing == settings.mentionaction {
+            String::from("__disabled__")
+        } else {
+            format!("__enabled__:\n      Members will be __{}__ if they ping __{}__ users, __{}__ mentions, or __{}__ of either within __{}__ seconds", match settings.mentionaction {
+                Action::Ban => "banned",
+                Action::Kick => "kicked",
+                Action::Mute => "muted",
+                Action::Nothing => "this state is not reachable in code",
+            }, settings.usermentions, settings.rollmentions, settings.anymentions, settings.mentiontime)
         },
         if let 0 = settings.logs {
-            String::from("No logging channel is configured")
+            String::from("__No__ logging channel is configured")
         } else {
-            format!("Logs are posted in <#{}>", settings.logs)
+            format!("Logs are posted in __<#{}>__", settings.logs)
         }
     );
 
@@ -217,7 +239,7 @@ async fn users(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         Some(id) => id.0.try_into().unwrap(),
         None => 0,
     };
-    if dbcontext.set_users(guild, choice).await {
+    if dbcontext.set_attr(&guild, "users", choice.try_into().unwrap()).await {
         msg.channel_id.say(&ctx.http, "Updated.").await?;
         Ok(())
     } else {
@@ -251,7 +273,7 @@ async fn time(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         msg.channel_id.say(&ctx.http, s).await?;
         return Ok(());
     }
-    if dbcontext.set_time(guild, choice).await {
+    if dbcontext.set_attr(&guild, "time", choice.try_into().unwrap()).await {
         msg.channel_id.say(&ctx.http, "Updated.").await?;
         Ok(())
     } else {
@@ -282,7 +304,7 @@ async fn logs(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         }
     };
 
-    if dbcontext.set_logs(guild, choice).await {
+    if dbcontext.set_attr(&guild, "logs", choice.try_into().unwrap()).await {
         msg.channel_id.say(&ctx.http, "Updated.").await?;
         Ok(())
     } else {
@@ -318,7 +340,7 @@ async fn setmuteroll(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
         return Ok(());
     };
 
-    if dbcontext.set_muteroll(guild, roll).await {
+    if dbcontext.set_attr(&guild, "muteroll", roll.try_into().unwrap()).await {
         msg.channel_id.say(&ctx.http, "Updated.").await?;
         Ok(())
     } else {
@@ -338,7 +360,7 @@ async fn enable(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         Some(id) => id.0.try_into().unwrap(),
         None => 0,
     };
-    if dbcontext.set_enabled(guild, true).await {
+    if dbcontext.set_enabled(&guild, true).await {
         msg.channel_id.say(&ctx.http, "Updated.").await?;
         Ok(())
     } else {
@@ -358,7 +380,7 @@ async fn disable(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         Some(id) => id.0.try_into().unwrap(),
         None => 0,
     };
-    if dbcontext.set_enabled(guild, false).await {
+    if dbcontext.set_enabled(&guild, false).await {
         msg.channel_id.say(&ctx.http, "Updated.").await?;
         Ok(())
     } else {
