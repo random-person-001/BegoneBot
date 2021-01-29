@@ -99,7 +99,7 @@ impl EventHandler for Handler {
     }
 
     async fn message(&self, ctx: Context, new_message: Message) {
-        println!("Message! {:?}", &new_message);
+        //println!("Message! {:?}", &new_message);
         // we use the message timestamp instead of time::now because of potential lag of events
         let timestamp: u64 = new_message.timestamp.timestamp_millis().try_into().unwrap();
         let guild = new_message.guild_id.unwrap().0;
@@ -166,7 +166,8 @@ struct Math;
     enable,
     disable,
     logs,
-    setmuteroll
+    setmuteroll,
+    uinfo
 )]
 struct AutoPanic;
 

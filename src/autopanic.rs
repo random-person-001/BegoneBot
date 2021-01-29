@@ -7,8 +7,8 @@ use std::convert::TryInto;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serenity::model::channel::GuildChannel;
 use serenity::{
+    prelude::Mentionable,
     async_trait,
     client::bridge::gateway::{ShardId, ShardManager},
     framework::standard::{
@@ -19,7 +19,7 @@ use serenity::{
     },
     http::Http,
     model::{
-        channel::{Channel, Message},
+        channel::{Channel, Message, GuildChannel},
         gateway::Ready,
         guild::Guild,
         id::UserId,
@@ -33,10 +33,13 @@ all times are stored as ms since unix epoch, as u64
 
 Next steps:
   transient states
-   - finish list of members joining and stuff,
    - add event driven checks of status and purging cache
-      - maybe move cache purge to slow loop later
+   - actual punishment and changy stuff
+   - better help
+   - better settings changing
 
+
+  - set status to D&D
 
 ? / help      display help
 .on/off        enable/disable auto panic
@@ -51,9 +54,9 @@ stop          turns off panic mode immediately
 
 - Dm autokicked/banned people with message like "we currently do not allow new people in the server because we are being raided, try again later", or something like that.
 
-- ability to get detailed and specific userinfo even if person isn't in the server (like avatar, username)
+. - ability to get detailed and specific userinfo even if person isn't in the server (like avatar, username)
 
-**later**
+
 .roll/user/any mention spam limit
 
 blacklist     automatically apply `action` to any new join at any time if they have a bad -
@@ -160,6 +163,60 @@ impl Sads {
     pub fn get_one(&self) -> &str {
         &self.maxpogs.choose(&mut rand::thread_rng()).unwrap()[..]
     }
+}
+
+fn humanize_duration(mut secs: i64) -> String {
+    println!("{}", secs);
+    let s = secs % 60;
+    secs -= s;
+    let m = (secs % 3600) / 60;
+    secs -= m * 60;
+    let h = (secs % (3600*24)) / 3600;
+    secs -= h * (3600);
+    let d = (secs % (3600*24*365)) / (3600*24);
+    secs -= d * (3600 * 24);
+    let y = secs/(3600 * 24 * 365);
+    format!("{}y {}d {}h {}m {}s", y, d, h, m, s)
+}
+
+
+#[command]
+/// Query discord for all the info we can find about a given user, specified by id
+async fn uinfo(ctx: &Context, msg: &Message, args:Args) -> CommandResult {
+    let user_id = UserId(match args.clone().single::<u64>() {
+        Ok(n) => n,
+        Err(why) => {
+            msg.channel_id.say(&ctx.http, "Sorry, that wasn't recognized as a reasonable discord user id.").await?;
+            return Ok(());
+        }
+    });
+    match user_id.to_user(&ctx.http).await {
+        Ok(u) => {
+            let account_creation = u.created_at().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
+            let now:i64 = time_now().try_into().unwrap();
+            let age = humanize_duration(now/1000 - u.created_at().naive_utc().timestamp());
+            let msg = msg.channel_id.send_message(&ctx.http, |m| {
+                m.embed(|e| {
+                    e.title(u.tag());
+                    e.description(format!("{}\nAccount created on {}\nwhich is {} ago", u.mention(), account_creation, age));
+                    e.thumbnail(u.face());
+                    e.footer(|f| {
+                        f.text(format!("User id = {}", user_id.0));
+                        f
+                    });
+                    e
+                });
+                m
+            }).await;
+            ()
+        }
+        Err(why) => {
+            msg.channel_id.say(&ctx.http, "No user with that id could be found").await;
+            ()
+        },
+    };
+
+    Ok(())
 }
 
 #[command]
