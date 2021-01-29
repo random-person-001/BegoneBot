@@ -1,7 +1,11 @@
 use crate::db::{Action, MyDbContext, Settings};
+use rand::seq::SliceRandom;
 use serenity::framework::standard::CommandResult;
 use serenity::prelude::Context;
+use std::collections::HashMap;
 use std::convert::TryInto;
+use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serenity::model::channel::GuildChannel;
 use serenity::{
@@ -25,11 +29,14 @@ use serenity::{
 };
 /*
 
+all times are stored as ms since unix epoch, as u64
+
 Next steps:
   transient states
-   - make the bot know when it's panicking and have a list of members joining and stuff,
-   - make bot have temp copy of settings that's kept up to date
-   - print to stdout whenever db query fails
+   - finish list of members joining and stuff,
+   - add event driven checks of status and purging cache
+      - maybe move cache purge to slow loop later
+
 
 ? / help      display help
 .on/off        enable/disable auto panic
@@ -47,7 +54,7 @@ stop          turns off panic mode immediately
 - ability to get detailed and specific userinfo even if person isn't in the server (like avatar, username)
 
 **later**
-roll/user/any mention spam limit
+.roll/user/any mention spam limit
 
 blacklist     automatically apply `action` to any new join at any time if they have a bad -
  name simple  username
@@ -72,6 +79,89 @@ fn on_user_join(&state, &user) {
         // punish the user
 }*/
 
+pub fn check_against_pings(ctx: &Context, mom: &mut YourMama, guild: u64) {
+    println!("I am totally checking for people pinging too much here");
+}
+
+pub fn check_against_joins(ctx: &Context, mom: &mut YourMama, guild: u64) {
+    println!("I am totally checking for people joining too much here");
+}
+
+/// Check if if we are more than `dt_seconds` past a past timestamp
+pub fn time_is_past(start: u64, dt_seconds: u64) -> bool {
+    return time_now() > start + 1000 * dt_seconds;
+}
+
+/// Return ms since epoch
+pub fn time_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_millis()
+        .try_into()
+        .unwrap()
+}
+
+#[derive(Debug)]
+pub struct Gramma {
+    pub guild_mamas: HashMap<u64, YourMama>,
+}
+
+impl Gramma {
+    pub fn new() -> Self {
+        Gramma {
+            guild_mamas: HashMap::new(),
+        }
+    }
+
+    pub fn get(&mut self, guild: &u64) -> &mut YourMama {
+        return self.guild_mamas.entry(*guild).or_insert(YourMama::new());
+    }
+}
+
+/// Store of transient info for the bot
+#[derive(Debug)]
+pub struct YourMama {
+    pub recent_users: HashMap<u64, u64>,       // time joined / user
+    pub userpings: HashMap<u64, (usize, u64)>, // timestamp, number of pings, user
+    pub rollpings: HashMap<u64, (usize, u64)>, // timestamp, number of pings, user
+    pub panicking: bool,
+    pub panick_end: i64,
+}
+
+impl YourMama {
+    pub fn new() -> Self {
+        YourMama {
+            recent_users: HashMap::new(),
+            userpings: HashMap::new(),
+            rollpings: HashMap::new(),
+            panicking: false,
+            panick_end: -1,
+        }
+    }
+}
+
+/// for getting a random sadface
+struct Sads {
+    pub maxpogs: Vec<String>,
+}
+
+impl Sads {
+    pub fn new() -> Self {
+        Sads {
+            maxpogs: vec![
+                String::from("<:maxpog1:804177392775331863>"),
+                String::from("<:maxpog2:804178291866861578>"),
+                String::from("<:maxpog3:804179033351782441>"),
+            ],
+        }
+    }
+
+    pub fn get_one(&self) -> &str {
+        &self.maxpogs.choose(&mut rand::thread_rng()).unwrap()[..]
+    }
+}
+
 #[command]
 async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let choice = args.clone().single::<String>().unwrap().to_lowercase();
@@ -89,16 +179,14 @@ async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         "mute" => Action::Mute,
         "nothing" => Action::Nothing,
         default => {
-            msg.channel_id
-                .say(
-                    &ctx.http,
-                    "Sorry that wasn't recognized.  Recognized options are ban, kick, or mute",
-                )
-                .await?;
+            let s = "Sorry that wasn't recognized. Recognized options are ban, kick, or mute";
+            msg.channel_id.say(&ctx.http, s).await?;
             return Ok(());
         }
     };
-    dbcontext.set_attr(&guild, "action", choice.try_into().unwrap()).await;
+    dbcontext
+        .set_attr(&guild, "action", choice.try_into().unwrap())
+        .await;
 
     msg.channel_id.say(&ctx.http, "Updated.").await?;
     if let Some(settings) = dbcontext.fetch_settings(&guild).await {
@@ -113,7 +201,9 @@ async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             if roll > 0 {
                 let s = "Automatically detected the Muted roll here";
                 msg.channel_id.say(&ctx.http, s).await?;
-                dbcontext.set_attr(&guild, "muteroll", roll.try_into().unwrap()).await;
+                dbcontext
+                    .set_attr(&guild, "muteroll", roll.try_into().unwrap())
+                    .await;
             } else {
                 let s = "Please specify which roll to give members to mute them by running antiraid setmuteroll @thatroll. Until then I cannot help you in a raid.";
                 msg.channel_id.say(&ctx.http, s).await?;
@@ -161,6 +251,8 @@ async fn current(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     let settings = dbcontext.fetch_settings(&guild).await;
     let settings = settings.unwrap();
 
+    // embeds -
+    // https://github.com/serenity-rs/serenity/blob/current/examples/e09_create_message_builder/src/main.rs
     let s = format!(
         r#"**Automatic antiraid settings**
     Automatic raid detection is currently __{}__
@@ -189,7 +281,7 @@ async fn current(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
                 } else {
                     format!("__muted__ (given __<@&{}>__)", settings.muteroll)
                 }
-            },
+            }
             Action::Nothing => String::from("__left alone__ by me"),
         },
         if Action::Nothing == settings.mentionaction {
@@ -205,10 +297,14 @@ async fn current(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         if let 0 = settings.logs {
             String::from("__No__ logging channel is configured")
         } else {
-            format!("Logs are posted in __<#{}>__ \n    __{}__ is pinged when a raid is detected", settings.logs, match settings.notify{
-                0 => String::from("no roll"),
-                n => format!("<@&{}>", n)
-            })
+            format!(
+                "Logs are posted in __<#{}>__ \n    __{}__ is pinged when a raid is detected",
+                settings.logs,
+                match settings.notify {
+                    0 => String::from("no roll"),
+                    n => format!("<@&{}>", n),
+                }
+            )
         }
     );
 
@@ -242,7 +338,10 @@ async fn users(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         Some(id) => id.0.try_into().unwrap(),
         None => 0,
     };
-    if dbcontext.set_attr(&guild, "users", choice.try_into().unwrap()).await {
+    if dbcontext
+        .set_attr(&guild, "users", choice.try_into().unwrap())
+        .await
+    {
         msg.channel_id.say(&ctx.http, "Updated.").await?;
         Ok(())
     } else {
@@ -276,7 +375,10 @@ async fn time(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         msg.channel_id.say(&ctx.http, s).await?;
         return Ok(());
     }
-    if dbcontext.set_attr(&guild, "time", choice.try_into().unwrap()).await {
+    if dbcontext
+        .set_attr(&guild, "time", choice.try_into().unwrap())
+        .await
+    {
         msg.channel_id.say(&ctx.http, "Updated.").await?;
         Ok(())
     } else {
@@ -307,7 +409,10 @@ async fn logs(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         }
     };
 
-    if dbcontext.set_attr(&guild, "logs", choice.try_into().unwrap()).await {
+    if dbcontext
+        .set_attr(&guild, "logs", choice.try_into().unwrap())
+        .await
+    {
         msg.channel_id.say(&ctx.http, "Updated.").await?;
         Ok(())
     } else {
@@ -343,7 +448,10 @@ async fn setmuteroll(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
         return Ok(());
     };
 
-    if dbcontext.set_attr(&guild, "muteroll", roll.try_into().unwrap()).await {
+    if dbcontext
+        .set_attr(&guild, "muteroll", roll.try_into().unwrap())
+        .await
+    {
         msg.channel_id.say(&ctx.http, "Updated.").await?;
         Ok(())
     } else {

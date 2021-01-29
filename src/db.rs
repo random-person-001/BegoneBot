@@ -1,10 +1,10 @@
 use serenity::model::application::MembershipState::Accepted;
 use sqlx;
-use sqlx::{query_as_with, sqlx_macros, Result, Sqlite, Encode, Decode, Database};
-use std::convert::TryInto;
 use sqlx::database::HasValueRef;
-use std::error::Error;
+use sqlx::{query_as_with, sqlx_macros, Database, Decode, Encode, Result, Sqlite};
 use std::collections::HashMap;
+use std::convert::TryInto;
+use std::error::Error;
 
 /// What to do to noobs when shit hits the fan (autopanic on)
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -64,8 +64,6 @@ pub struct Settings {
     pub notify: u64, // who to ping in logs when stuff goes down
 }
 
-
-
 #[derive(Debug, sqlx::FromRow)]
 struct RawSettings {
     guild: u64,
@@ -116,7 +114,10 @@ pub struct MyDbContext {
 
 impl MyDbContext {
     pub fn new(pool: sqlx::SqlitePool) -> Self {
-        return MyDbContext { pool, cache: HashMap::new() };
+        return MyDbContext {
+            pool,
+            cache: HashMap::new(),
+        };
     }
 
     pub async fn add_guild_table(&self) -> bool {
@@ -165,11 +166,11 @@ impl MyDbContext {
                 let settings = self.fetch_settings(&guild).await.unwrap();
                 self.cache.insert(guild.clone(), settings);
                 true
-            },
+            }
             Err(why) => {
                 println!("Something went wrong adding guild: {:?}", why);
                 false
-            },
+            }
         }
     }
 
@@ -206,11 +207,14 @@ impl MyDbContext {
             Ok(_) => {
                 self.cache.get_mut(&guild).unwrap().enabled = enabled;
                 true
-            },
+            }
             Err(why) => {
-                println!("Something went wrong setting enabled of {}: {:?}", guild, why);
+                println!(
+                    "Something went wrong setting enabled of {}: {:?}",
+                    guild, why
+                );
                 false
-            },
+            }
         }
     }
 
@@ -239,12 +243,15 @@ impl MyDbContext {
                     "mentionaction" => settings.mentionaction = value.try_into().unwrap(),
                     "notify" => settings.notify = value.try_into().unwrap(),
                     s => {
-                        println!("Broski I couldn't update the cached settings cuz {} wasn't in there", s);
-                        return false
-                    },
+                        println!(
+                            "Broski I couldn't update the cached settings cuz {} wasn't in there",
+                            s
+                        );
+                        return false;
+                    }
                 };
                 true
-            },
+            }
             Err(why) => {
                 println!("Error updating settings db for {}: {:?}", guild, why);
                 false

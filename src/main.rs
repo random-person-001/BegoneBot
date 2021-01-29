@@ -1,7 +1,11 @@
 #![allow(unused)]
+use crate::db::MyDbContext;
+use serenity::model::prelude::*;
+use sqlx::Result;
+
 use serenity::{
     async_trait,
-    client::bridge::gateway::{ShardId, ShardManager},
+    client::bridge::gateway::{GatewayIntents, ShardId, ShardManager},
     framework::standard::{
         buckets::{LimitedFor, RevertBucket},
         help_commands,
@@ -31,6 +35,8 @@ use tokio::sync::Mutex;
 mod autopanic;
 mod db;
 use crate::autopanic::*;
+use std::convert::TryInto;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // A container type is created for inserting into the Client's `data`, which
 // allows for data to be accessible across all events and framework commands, or
@@ -51,14 +57,14 @@ impl TypeMapKey for db::MyDbContext {
     type Value = db::MyDbContext;
 }
 
+impl TypeMapKey for autopanic::Gramma {
+    type Value = autopanic::Gramma;
+}
+
 struct Handler;
 
 #[async_trait]
 impl EventHandler for Handler {
-    async fn ready(&self, _: Context, ready: Ready) {
-        println!("{} is connected!", ready.user.name);
-    }
-
     async fn guild_create(&self, ctx: Context, guild: Guild, is_new: bool) {
         let mut data = ctx.data.write().await;
         let mut dbcontext = data
@@ -69,21 +75,61 @@ impl EventHandler for Handler {
             dbcontext.cache.insert(*id, s);
         } else {
             println!("Creating a new settings row for guild {}", id);
-            dbcontext.add_guild(id).await;
+            dbcontext.add_guild(id).await; // also adds to cache
         };
+    }
+
+    async fn guild_member_addition(&self, ctx: Context, guild_id: GuildId, new_member: Member) {
+        println!("new member joined: {:?}", new_member);
+        let mut data = ctx.data.write().await;
+        let mut grammy = data
+            .get_mut::<autopanic::Gramma>()
+            .expect("Expected your momma in TypeMap.");
+        let mut mom = grammy.get(&guild_id.0);
+        mom.recent_users.insert(
+            new_member
+                .joined_at
+                .unwrap()
+                .timestamp_millis()
+                .try_into()
+                .unwrap(),
+            new_member.user.id.0,
+        );
+        autopanic::check_against_joins(&ctx, mom, guild_id.0);
+    }
+
+    async fn message(&self, ctx: Context, new_message: Message) {
+        println!("Message! {:?}", &new_message);
+        // we use the message timestamp instead of time::now because of potential lag of events
+        let timestamp: u64 = new_message.timestamp.timestamp_millis().try_into().unwrap();
+        let guild = new_message.guild_id.unwrap().0;
+        let author = new_message.author.id.0;
+        let mut data = ctx.data.write().await;
+        let mut grammy = data
+            .get_mut::<autopanic::Gramma>()
+            .expect("Expected your momma in TypeMap.");
+        let mut mom = grammy.get(&guild);
+
+        if !new_message.mentions.is_empty() {
+            mom.userpings
+                .insert(timestamp, (new_message.mentions.len(), author));
+        }
+        if !new_message.mention_roles.is_empty() {
+            mom.rollpings
+                .insert(timestamp, (new_message.mentions.len(), author));
+        }
+        if !new_message.mention_roles.is_empty() || !new_message.mentions.is_empty() {
+            autopanic::check_against_pings(&ctx, mom, guild);
+        }
+    }
+
+    async fn ready(&self, _: Context, ready: Ready) {
+        println!("{} is connected!", ready.user.name);
     }
 }
 
 #[group]
-#[commands(
-    about,
-    am_i_admin,
-    say,
-    commands,
-    ping,
-    some_long_command,
-    upper_command
-)]
+#[commands(about, ping, upper_command)]
 struct General;
 
 #[group]
@@ -123,15 +169,6 @@ struct Math;
     setmuteroll
 )]
 struct AutoPanic;
-
-#[group]
-#[owners_only]
-// Limit all commands to be guild-restricted.
-#[only_in(guilds)]
-// Summary only appears when listing multiple groups.
-#[summary = "Commands for server owners"]
-#[commands(slow_mode)]
-struct Owner;
 
 #[help]
 // This replaces the information that a user can pass
@@ -176,17 +213,6 @@ async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
         "Got command '{}' by user '{}'",
         command_name, msg.author.name
     );
-
-    // Increment the number of times this command has been run once. If
-    // the command's name does not exist in the counter, add a default
-    // value of 0.
-    let mut data = ctx.data.write().await;
-    let counter = data
-        .get_mut::<CommandCounter>()
-        .expect("Expected CommandCounter in TypeMap.");
-    let entry = counter.entry(command_name.to_string()).or_insert(0);
-    *entry += 1;
-
     true // if `before` returns false, command processing doesn't happen.
 }
 
@@ -201,12 +227,6 @@ async fn after(_ctx: &Context, _msg: &Message, command_name: &str, command_resul
 #[hook]
 async fn unknown_command(_ctx: &Context, _msg: &Message, unknown_command_name: &str) {
     println!("Could not find command named '{}'", unknown_command_name);
-}
-
-#[hook]
-async fn delay_action(ctx: &Context, msg: &Message) {
-    // You may want to handle a Discord rate limit if this fails.
-    let _ = msg.react(ctx, '⏱').await;
 }
 
 #[hook]
@@ -225,35 +245,13 @@ async fn dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
     }
 }
 
-// You can construct a hook without the use of a macro, too.
-// This requires some boilerplate though and the following additional import.
-use crate::db::MyDbContext;
-use serenity::{futures::future::BoxFuture, FutureExt};
-use sqlx::Result;
-
-fn _dispatch_error_no_macro<'fut>(
-    ctx: &'fut mut Context,
-    msg: &'fut Message,
-    error: DispatchError,
-) -> BoxFuture<'fut, ()> {
-    async move {
-        if let DispatchError::Ratelimited(info) = error {
-            if info.is_first_try {
-                let _ = msg
-                    .channel_id
-                    .say(
-                        &ctx.http,
-                        &format!("Try this again in {} seconds.", info.as_secs()),
-                    )
-                    .await;
-            }
-        };
-    }
-    .boxed()
-}
-
 #[tokio::main]
 async fn main() {
+    let start = SystemTime::now();
+    let since_the_epoch = start
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+    println!("{:?}", since_the_epoch);
     // Configure the client with your Discord bot token in the environment.
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
 
@@ -284,22 +282,6 @@ async fn main() {
         // Can't be used more than once per 5 seconds:
         .bucket("emoji", |b| b.delay(5))
         .await
-        // Can't be used more than 2 times per 30 seconds, with a 5 second delay applying per channel.
-        // Optionally `await_ratelimits` will delay until the command can be executed instead of
-        // cancelling the command invocation.
-        .bucket("complicated", |b| {
-            b.limit(2)
-                .time_span(30)
-                .delay(5)
-                // The target each bucket will apply to.
-                .limit_for(LimitedFor::Channel)
-                // The maximum amount of command invocations that can be delayed per target.
-                // Setting this to 0 (default) will never await/delay commands and cancel the invocation.
-                .await_ratelimits(1)
-                // A function to call when a rate limit leads to a delay.
-                .delay_action(delay_action)
-        })
-        .await
         // The `#[group]` macro generates `static` instances of the options set for the group.
         // They're made in the pattern: `#name_GROUP` for the group instance and `#name_GROUP_OPTIONS`.
         // #name is turned all uppercase
@@ -307,12 +289,12 @@ async fn main() {
         .group(&GENERAL_GROUP)
         .group(&EMOJI_GROUP)
         .group(&MATH_GROUP)
-        .group(&AUTOPANIC_GROUP)
-        .group(&OWNER_GROUP);
+        .group(&AUTOPANIC_GROUP);
 
     let mut client = Client::builder(&token)
         .event_handler(Handler)
         .framework(framework)
+        .intents(GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES) // TODO: more of these!
         .await
         .expect("Err creating client");
 
@@ -320,6 +302,7 @@ async fn main() {
         let conn = sqlx::SqlitePool::connect("db.sqlite").await;
         let mut data = client.data.write().await;
         data.insert::<db::MyDbContext>(MyDbContext::new(conn.unwrap()));
+        data.insert::<autopanic::Gramma>(autopanic::Gramma::new());
         data.insert::<CommandCounter>(HashMap::default());
         data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
     }
@@ -327,64 +310,6 @@ async fn main() {
     if let Err(why) = client.start().await {
         println!("Client error: {:?}", why);
     }
-}
-
-// Commands can be created via the attribute `#[command]` macro.
-#[command]
-// Options are passed via subsequent attributes.
-// Make this command use the "complicated" bucket.
-#[bucket = "complicated"]
-async fn commands(ctx: &Context, msg: &Message) -> CommandResult {
-    let mut contents = "Commands used:\n".to_string();
-
-    let data = ctx.data.read().await;
-    let counter = data
-        .get::<CommandCounter>()
-        .expect("Expected cnter in TypeMap.");
-
-    for (k, v) in counter {
-        writeln!(contents, "- {name}: {amount}", name = k, amount = v)?;
-    }
-
-    msg.channel_id.say(&ctx.http, &contents).await?;
-
-    Ok(())
-}
-
-// Repeats what the user passed as argument but ensures that user and role
-// mentions are replaced with a safe textual alternative.
-// In this example channel mentions are excluded via the `ContentSafeOptions`.
-#[command]
-async fn say(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let settings = if let Some(guild_id) = msg.guild_id {
-        // By default roles, users, and channel mentions are cleaned.
-        ContentSafeOptions::default()
-            // We do not want to clean channal mentions as they
-            // do not ping users.
-            .clean_channel(false)
-            // If it's a guild channel, we want mentioned users to be displayed
-            // as their display name.
-            .display_as_member_from(guild_id)
-    } else {
-        ContentSafeOptions::default()
-            .clean_channel(false)
-            .clean_role(false)
-    };
-
-    let content = content_safe(&ctx.cache, &args.rest(), &settings).await;
-
-    msg.channel_id.say(&ctx.http, &content).await?;
-
-    Ok(())
-}
-
-#[command]
-async fn some_long_command(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    msg.channel_id
-        .say(&ctx.http, &format!("Arguments: {:?}", args.rest()))
-        .await?;
-
-    Ok(())
 }
 
 #[command]
