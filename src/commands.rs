@@ -1,4 +1,5 @@
 use crate::autopanic;
+use crate::autopanic::Gramma;
 use crate::db::{Action, MyDbContext};
 use serenity::{
     framework::standard::{
@@ -10,7 +11,6 @@ use serenity::{
 };
 use std::convert::TryInto;
 use std::process::exit;
-use crate::autopanic::Gramma;
 
 #[command]
 async fn invite(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
@@ -55,6 +55,60 @@ async fn cat(ctx: &Context, msg: &Message) -> CommandResult {
     msg.channel_id.say(&ctx.http, ":cat:").await?;
 
     // We can return one ticket to the bucket undoing the ratelimit.
+    Ok(())
+}
+
+#[command]
+async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let mut successes: u8 = 0;
+    let mut fails: u8 = 0;
+    while !args.is_empty() {
+        match args.single::<u64>() {
+            Ok(uid) => {
+                msg.guild_id
+                    .expect("infallable")
+                    .ban_with_reason(
+                        &ctx.http,
+                        uid,
+                        0,
+                        format!("Forceban ran by {}", msg.author.name),
+                    )
+                    .await;
+                successes += 1;
+            }
+            Err(why) => {
+                fails += 1;
+                args.advance();
+            },
+        }
+    }
+    if fails == 0 {
+        if successes == 0 {
+            msg.channel_id
+                .say(
+                    &ctx.http,
+                    "Please specify some user IDs after the command (separated by spaces)"
+                )
+                .await;
+        } else {
+            msg.channel_id
+                .say(
+                    &ctx.http,
+                    format!("Banned {} users successfully", successes),
+                )
+                .await;
+        }
+    } else {
+        msg.channel_id
+            .say(
+                &ctx.http,
+                format!(
+                    "Banned {} users successfully and {} unsuccessfully (please only specify user ids)",
+                    successes, fails
+                ),
+            )
+            .await;
+    }
     Ok(())
 }
 
@@ -152,7 +206,12 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     if args.is_empty() {
         println!("Panic mode manually activated for server {}", guild_id);
         mom.panicking = true;
-        msg.channel_id.say(&ctx.http, "Panic mode has been activated. Turn it off with `bb-panic off`").await;
+        msg.channel_id
+            .say(
+                &ctx.http,
+                "Panic mode has been activated. Turn it off with `bb-panic off`",
+            )
+            .await;
         autopanic::start_panicking(&ctx, mom, &settings, guild_id).await;
         return Ok(());
     }
@@ -164,13 +223,23 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             println!("Panic mode manually activated for server {}", guild_id);
             mom.panicking = true;
             autopanic::start_panicking(&ctx, mom, &settings, guild_id).await;
-            msg.channel_id.say(&ctx.http, "Panic mode has been activated. Turn it off with `bb-panic off`").await;
+            msg.channel_id
+                .say(
+                    &ctx.http,
+                    "Panic mode has been activated. Turn it off with `bb-panic off`",
+                )
+                .await;
         }
         "off" => {
             println!("Panic mode manually deactivated for server {}", guild_id);
             mom.panicking = false;
             autopanic::stop_panicking(&ctx, mom, &settings, guild_id).await;
-            msg.channel_id.say(&ctx.http, "Panic mode has been deactivated. Turn it on with `bb-panic`").await;
+            msg.channel_id
+                .say(
+                    &ctx.http,
+                    "Panic mode has been deactivated. Turn it on with `bb-panic`",
+                )
+                .await;
         }
         _ => {
             let m = "Broski... I need you to say `on` or `off` after that (if you don't put anything, I'll assume on)";

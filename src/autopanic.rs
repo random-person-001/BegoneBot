@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serenity::model::channel::PrivateChannel;
 use serenity::model::event::EventType::GuildBanAdd;
 use serenity::model::guild::VerificationLevel;
-use serenity::model::id::{GuildId, ChannelId};
+use serenity::model::id::{ChannelId, GuildId};
 use serenity::{
     async_trait,
     client::bridge::gateway::{ShardId, ShardManager},
@@ -50,8 +50,8 @@ Next steps:
 .users <#>     User joins needed to trigger AP
 .time <#>      time window to trigger AP
 .action        choose whether to ban, kick, or mute upon AP
-now           turns on panic mode immediately
-stop          turns off panic mode immediately
+.now           turns on panic mode immediately
+.stop          turns off panic mode immediately
 .muteroll @r   sets @r to be the roll applied automatically to noobs during panic when action=mute
 .logs #chan    sets #chan to be where logs occur
 
@@ -192,26 +192,41 @@ pub fn time_is_past(start: u64, dt_seconds: u64) -> bool {
     time_now() > start + 1000 * dt_seconds
 }
 
-pub(crate) async fn stop_panicking(ctx: &Context, mom: &mut YourMama, settings: &Settings, guild_id: u64) {
+pub(crate) async fn stop_panicking(
+    ctx: &Context,
+    mom: &mut YourMama,
+    settings: &Settings,
+    guild_id: u64,
+) {
     println!("We stopping the panic broooooo");
     mom.panicking = false;
     if settings.logs > 0 {
-        match ChannelId(settings.logs).say(&ctx.http, "Panic mode has been deactivated").await {
+        match ChannelId(settings.logs)
+            .say(&ctx.http, "Panic mode has been deactivated")
+            .await
+        {
             Ok(_) => (),
-            Err(why) => println!("error printing stuff: {}", why)
+            Err(why) => println!("error printing stuff: {}", why),
         }
     }
-    GuildId(guild_id).edit(&ctx.http, |g|{
-        g.verification_level(mom.normal_verification_level)
-    }).await;
+    GuildId(guild_id)
+        .edit(&ctx.http, |g| {
+            g.verification_level(mom.normal_verification_level)
+        })
+        .await;
 }
 
-pub(crate) async fn start_panicking(ctx: &Context, mom: &mut YourMama, settings: &Settings, guild_id: u64) {
+pub(crate) async fn start_panicking(
+    ctx: &Context,
+    mom: &mut YourMama,
+    settings: &Settings,
+    guild_id: u64,
+) {
     println!("We starting to panic broooooo");
     mom.panicking = true;
     match ctx.cache.guild(guild_id).await {
         Some(g) => mom.normal_verification_level = g.verification_level,
-        None => println!("bruh problemssaoheunstahoesnuta")
+        None => println!("bruh problemssaoheunstahoesnuta"),
     }
 
     if let Some(channel) = ctx.cache.guild_channel(guild_id).await {

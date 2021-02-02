@@ -134,7 +134,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(about, ping, invite, die, panic)] //, info, forceban, status)]
+#[commands(about, ping, invite, die, panic, uinfo, forceban)] // status)]
 struct General;
 
 #[group]
