@@ -72,6 +72,7 @@ impl EventHandler for Handler {
             .expect("Expected MyDbContext in TypeMap.");
         let id = &guild.id.0;
         if let Some(s) = dbcontext.fetch_settings(id).await {
+            println!("Found guild {} settings", id);
             dbcontext.cache.insert(*id, s);
         } else {
             println!("Creating a new settings row for guild {}", id);
@@ -80,7 +81,7 @@ impl EventHandler for Handler {
     }
 
     async fn guild_member_addition(&self, ctx: Context, guild_id: GuildId, new_member: Member) {
-        println!("new member joined: {:?}", new_member);
+        println!("new member joined: {}", new_member.user.name);
         let mut data = ctx.data.write().await;
         let mut grammy = data
             .get_mut::<autopanic::Gramma>()
@@ -95,11 +96,11 @@ impl EventHandler for Handler {
                 .unwrap(),
             new_member.user.id.0,
         );
-        autopanic::check_against_joins(&ctx, mom, guild_id.0);
+        check_against_joins(&ctx, mom, guild_id.0).await;
     }
 
     async fn message(&self, ctx: Context, new_message: Message) {
-        //println!("Message! {:?}", &new_message);
+        println!("Message! {}", &new_message.content);
         // we use the message timestamp instead of time::now because of potential lag of events
         let timestamp: u64 = new_message.timestamp.timestamp_millis().try_into().unwrap();
         let guild = new_message.guild_id.unwrap().0;
@@ -119,7 +120,7 @@ impl EventHandler for Handler {
                 .insert(timestamp, (new_message.mentions.len(), author));
         }
         if !new_message.mention_roles.is_empty() || !new_message.mentions.is_empty() {
-            autopanic::check_against_pings(&ctx, mom, guild);
+            autopanic::check_against_pings(&ctx, mom, guild).await;
         }
     }
 
@@ -295,7 +296,7 @@ async fn main() {
     let mut client = Client::builder(&token)
         .event_handler(Handler)
         .framework(framework)
-        .intents(GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES) // TODO: more of these!
+        .intents(GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::privileged()) // TODO: more of these!
         .await
         .expect("Err creating client");
 

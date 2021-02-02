@@ -1,7 +1,7 @@
 use crate::db::{Action, MyDbContext, Settings};
 use rand::seq::SliceRandom;
 use serenity::framework::standard::CommandResult;
-use serenity::prelude::Context;
+use serenity::prelude::{Context, SerenityError};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::time::Duration;
@@ -24,9 +24,14 @@ use serenity::{
         guild::Guild,
         id::UserId,
         permissions::Permissions,
+        user::User,
     },
     utils::{content_safe, ContentSafeOptions},
 };
+use serenity::model::event::EventType::GuildBanAdd;
+use serenity::model::id::GuildId;
+use serenity::model::guild::VerificationLevel;
+use serenity::model::channel::PrivateChannel;
 /*
 
 all times are stored as ms since unix epoch, as u64
@@ -37,7 +42,6 @@ Next steps:
    - actual punishment and changy stuff
    - better help
    - better settings changing
-
 
   - set status to D&D
 
@@ -54,7 +58,7 @@ stop          turns off panic mode immediately
 
 - Dm autokicked/banned people with message like "we currently do not allow new people in the server because we are being raided, try again later", or something like that.
 
-. - ability to get detailed and specific userinfo even if person isn't in the server (like avatar, username)
+.ability to get detailed and specific userinfo even if person isn't in the server (like avatar, username)
 
 
 .roll/user/any mention spam limit
@@ -82,17 +86,117 @@ fn on_user_join(&state, &user) {
         // punish the user
 }*/
 
-pub fn check_against_pings(ctx: &Context, mom: &mut YourMama, guild: u64) {
+pub async fn check_against_pings(ctx: &Context, mom: &mut YourMama, guild: u64) {
     println!("I am totally checking for people pinging too much here");
 }
 
-pub fn check_against_joins(ctx: &Context, mom: &mut YourMama, guild: u64) {
+pub async fn check_against_joins(ctx: &Context, mom: &mut YourMama, guild: u64) {
     println!("I am totally checking for people joining too much here");
+
+    let mut data = ctx.data.write().await;
+    let mut dbcontext = data
+        .get_mut::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+
+    let settings = dbcontext.fetch_settings(&guild).await.unwrap();
+    let max_users = settings.users;
+    let max_time = settings.time;
+    let now = time_now();
+    let mut n = 0;
+    let mut latest_joiner_ts:u64 = 0;
+    for (&timestamp, &user) in &mom.recent_users {
+        if now - timestamp > (max_time * 1000) as u64 {
+            n += 1;
+            if timestamp > latest_joiner_ts {
+                latest_joiner_ts = timestamp;
+            }
+        }
+    }
+    println!("Aaaaaaa why doesn't this print??"); // todo : solve this mystery
+    println!("{:?}", mom);
+    if n < max_users {
+        return;
+    }
+    // PANIC!  WE'RE BEING RAIDED.  this is the turn-panic-on clause
+    if !mom.panicking {
+        start_panicing(&ctx, mom, &settings, guild);
+    }
+    mom.panick_end = now as i64 + (max_time * 1000 * 4) as i64;  // todo: note implementation here
+
+    if mom.panicking {
+        let g = GuildId(guild).to_guild_cached(&ctx.cache).await.expect("it should be cached bruh");
+        let user = UserId(*mom.recent_users.get(&latest_joiner_ts).expect("broski "));
+        let dms:Option<PrivateChannel> = match user.create_dm_channel(&ctx.http).await {
+            Ok(chan) => Some(chan),
+            Err(why) => {
+                println!("Couldn't make dm channel to apologize to {} in guild {}", user.0, guild);
+                None
+            }
+        };
+        match settings.action {
+            Action::Ban => {
+                if let Some(chan) = dms {
+                    chan.say(&ctx.http, "Unfortunately, the server you are trying to join is being raided, and you have been banned").await;
+                }
+                g.ban_with_reason(&ctx.http, user, 0, "joined while raid ongoing");
+                // ban them
+            }
+            Action::Kick => {
+                if let Some(chan) = dms {
+                    chan.say(&ctx.http, "Unfortunately, the server you are trying to join is being raided, and you have been kicked").await;
+                }
+                g.kick_with_reason(&ctx.http, user, "joined while raid ongoing");
+                // kick them
+            }
+            Action::Mute => {
+                if settings.muteroll > 0 {
+                    if let Some(chan) = dms {
+                        chan.say(&ctx.http, "Unfortunately, the server you are trying to join is being raided, and you have been muted").await;
+                    }
+                    let mut member = match g.member(ctx, user).await {
+                        Ok(m) => m,
+                        Err(why) => {
+                            println!("member may have already yeeted {}", why);
+                            return;
+                        }
+                    };
+                    // Assign role
+                    match member.add_role(ctx, settings.muteroll).await {
+                        Ok(_) => (),
+                        Err(why) => {
+                            println!("big h moment: {}", why);
+                            return;
+                        }
+                    }
+                }
+            }
+            _ => ()
+        };
+    } else {}
 }
 
 /// Check if if we are more than `dt_seconds` past a past timestamp
 pub fn time_is_past(start: u64, dt_seconds: u64) -> bool {
-    return time_now() > start + 1000 * dt_seconds;
+    time_now() > start + 1000 * dt_seconds
+}
+
+async fn start_panicing(ctx: &Context, mom: &mut YourMama, settings: &Settings, guild_id: u64) {
+    mom.panicking = true;
+    if let Some(channel) = ctx.cache.guild_channel(guild_id).await {
+        if 0 < settings.notify {
+            channel.say(&ctx.http, format!("bruh <@&{}> we are under a tack", settings.notify));
+        } else {
+            channel.say(&ctx.http, "Bruh we are under a tack");
+        }
+    }
+
+    let mut g = GuildId(guild_id);
+    match g.edit(&ctx.http, |g| {
+        g.verification_level(VerificationLevel::High)
+    }).await {
+        Ok(_) => println!("set verification level of {} to High", g.0),
+        Err(why) => println!("Error setting verification level of {}: {}", g.0, why),
+    };
 }
 
 /// Return ms since epoch
@@ -118,7 +222,7 @@ impl Gramma {
     }
 
     pub fn get(&mut self, guild: &u64) -> &mut YourMama {
-        return self.guild_mamas.entry(*guild).or_insert(YourMama::new());
+        return self.guild_mamas.entry(*guild).or_insert_with(YourMama::new);
     }
 }
 
@@ -208,11 +312,9 @@ async fn uinfo(ctx: &Context, msg: &Message, args:Args) -> CommandResult {
                 });
                 m
             }).await;
-            ()
         }
         Err(why) => {
             msg.channel_id.say(&ctx.http, "No user with that id could be found").await;
-            ()
         },
     };
 
@@ -227,7 +329,7 @@ async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     let guild: u64 = match msg.guild_id {
-        Some(id) => id.0.try_into().unwrap(),
+        Some(id) => id.0,
         None => 0,
     };
     let choice = match &choice[..] {
@@ -247,7 +349,7 @@ async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
     msg.channel_id.say(&ctx.http, "Updated.").await?;
     if let Some(settings) = dbcontext.fetch_settings(&guild).await {
-        if &choice == &Action::Mute && settings.muteroll == 0 {
+        if choice == Action::Mute && settings.muteroll == 0 {
             let mut roll: u64 = 0;
             if let Some(rol) = get_roll_id_by_name(&ctx, &msg, "muted").await {
                 roll = rol;
@@ -279,7 +381,7 @@ async fn reset(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     let guild: u64 = match msg.guild_id {
-        Some(id) => id.0.try_into().unwrap(),
+        Some(id) => id.0,
         None => 0,
     };
 
@@ -301,7 +403,7 @@ async fn current(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     let guild: u64 = match msg.guild_id {
-        Some(id) => id.0.try_into().unwrap(),
+        Some(id) => id.0,
         None => 0,
     };
 
@@ -392,7 +494,7 @@ async fn users(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     let guild: u64 = match msg.guild_id {
-        Some(id) => id.0.try_into().unwrap(),
+        Some(id) => id.0,
         None => 0,
     };
     if dbcontext
@@ -416,7 +518,7 @@ async fn time(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     let guild: u64 = match msg.guild_id {
-        Some(id) => id.0.try_into().unwrap(),
+        Some(id) => id.0,
         None => 0,
     };
     let choice = match args.clone().single::<u32>() {
@@ -453,7 +555,7 @@ async fn logs(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     let guild: u64 = match msg.guild_id {
-        Some(id) => id.0.try_into().unwrap(),
+        Some(id) => id.0,
         None => 0,
     };
     let choice = args.clone().single::<String>().unwrap();
@@ -487,7 +589,7 @@ async fn setmuteroll(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     let guild: u64 = match msg.guild_id {
-        Some(id) => id.0.try_into().unwrap(),
+        Some(id) => id.0,
         None => 0,
     };
     let choice = args.clone().single::<String>().unwrap();
@@ -525,7 +627,7 @@ async fn enable(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     let guild: u64 = match msg.guild_id {
-        Some(id) => id.0.try_into().unwrap(),
+        Some(id) => id.0,
         None => 0,
     };
     if dbcontext.set_enabled(&guild, true).await {
@@ -545,7 +647,7 @@ async fn disable(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     let guild: u64 = match msg.guild_id {
-        Some(id) => id.0.try_into().unwrap(),
+        Some(id) => id.0,
         None => 0,
     };
     if dbcontext.set_enabled(&guild, false).await {
@@ -564,15 +666,9 @@ async fn disable(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 /// If you attempt to index out of bounds, it will return a ` `
 fn nth_char(s: &str, n: isize) -> char {
     if n < 0 {
-        return match s.chars().last() {
-            Some(c) => c,
-            None => ' ',
-        };
+        return s.chars().last().unwrap_or(' ');
     };
-    match s.chars().nth(n.try_into().unwrap()) {
-        Some(c) => c,
-        None => ' ',
-    }
+    s.chars().nth(n.try_into().unwrap()).unwrap_or(' ')
 }
 
 /// Extract a discord ID (`u64`) from a word that is a discord mention
