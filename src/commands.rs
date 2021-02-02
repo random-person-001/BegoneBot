@@ -1,12 +1,16 @@
-use std::process::exit;
-use std::convert::TryInto;
-use serenity::{
-    prelude::{Context, SerenityError},
-    model::prelude::{Message, UserId, Mentionable},
-    framework::standard::{Args, CommandResult, macros::{command, check}}
-};
 use crate::autopanic;
-use crate::db::{MyDbContext, Action};
+use crate::db::{Action, MyDbContext};
+use serenity::{
+    framework::standard::{
+        macros::{check, command},
+        Args, CommandResult,
+    },
+    model::prelude::{Mentionable, Message, UserId},
+    prelude::{Context, SerenityError},
+};
+use std::convert::TryInto;
+use std::process::exit;
+use crate::autopanic::Gramma;
 
 #[command]
 async fn invite(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
@@ -21,7 +25,9 @@ async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         ctx.shard.shutdown_clean();
         exit(0);
     } else {
-        msg.channel_id.say(&ctx.http, "shut up pleb").await?;
+        msg.channel_id
+            .say(&ctx.http, "shut up pleb you're dirt to me")
+            .await?;
     }
     Ok(())
 }
@@ -75,37 +81,103 @@ async fn bird(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
 #[command]
 /// Query discord for all the info we can find about a given user, specified by id
-async fn uinfo(ctx: &Context, msg: &Message, args:Args) -> CommandResult {
+async fn uinfo(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let user_id = UserId(match args.clone().single::<u64>() {
         Ok(n) => n,
         Err(why) => {
-            msg.channel_id.say(&ctx.http, "Sorry, that wasn't recognized as a reasonable discord user id.").await?;
+            msg.channel_id
+                .say(
+                    &ctx.http,
+                    "Sorry, that wasn't recognized as a reasonable discord user id.",
+                )
+                .await?;
             return Ok(());
         }
     });
     match user_id.to_user(&ctx.http).await {
         Ok(u) => {
-            let account_creation = u.created_at().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
-            let now:i64 = autopanic::time_now().try_into().unwrap();
-            let age = humanize_duration(now/1000 - u.created_at().naive_utc().timestamp());
-            let msg = msg.channel_id.send_message(&ctx.http, |m| {
-                m.embed(|e| {
-                    e.title(u.tag());
-                    e.description(format!("{}\nAccount created on {}\nwhich is {} ago", u.mention(), account_creation, age));
-                    e.thumbnail(u.face());
-                    e.footer(|f| {
-                        f.text(format!("User id = {}", user_id.0));
-                        f
+            let account_creation = u
+                .created_at()
+                .naive_utc()
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string();
+            let now: i64 = autopanic::time_now().try_into().unwrap();
+            let age = humanize_duration(now / 1000 - u.created_at().naive_utc().timestamp());
+            let msg = msg
+                .channel_id
+                .send_message(&ctx.http, |m| {
+                    m.embed(|e| {
+                        e.title(u.tag());
+                        e.description(format!(
+                            "{}\nAccount created on {}\nwhich is {} ago",
+                            u.mention(),
+                            account_creation,
+                            age
+                        ));
+                        e.thumbnail(u.face());
+                        e.footer(|f| {
+                            f.text(format!("User id = {}", user_id.0));
+                            f
+                        });
+                        e
                     });
-                    e
-                });
-                m
-            }).await;
+                    m
+                })
+                .await;
         }
         Err(why) => {
-            msg.channel_id.say(&ctx.http, "No user with that id could be found").await;
-        },
+            msg.channel_id
+                .say(&ctx.http, "No user with that id could be found")
+                .await;
+        }
     };
+
+    Ok(())
+}
+
+#[command]
+async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let mut data = ctx.data.write().await;
+    let guild_id = msg.guild_id.expect("infallible").0;
+
+    let mut dbcontext = data
+        .get_mut::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+    let settings = dbcontext.fetch_settings(&guild_id).await.unwrap();
+    let mut mom = data
+        .get_mut::<Gramma>()
+        .expect("Expected your momma in TypeMap.")
+        .get(&guild_id);
+
+    if args.is_empty() {
+        println!("Panic mode manually activated for server {}", guild_id);
+        mom.panicking = true;
+        msg.channel_id.say(&ctx.http, "Panic mode has been activated. Turn it off with `bb-panic off`").await;
+        autopanic::start_panicking(&ctx, mom, &settings, guild_id).await;
+        return Ok(());
+    }
+
+    let choice = args.clone().single::<String>().unwrap().to_lowercase();
+    println!("'{}'", choice);
+    match &choice[..] {
+        "on" => {
+            println!("Panic mode manually activated for server {}", guild_id);
+            mom.panicking = true;
+            autopanic::start_panicking(&ctx, mom, &settings, guild_id).await;
+            msg.channel_id.say(&ctx.http, "Panic mode has been activated. Turn it off with `bb-panic off`").await;
+        }
+        "off" => {
+            println!("Panic mode manually deactivated for server {}", guild_id);
+            mom.panicking = false;
+            autopanic::stop_panicking(&ctx, mom, &settings, guild_id).await;
+            msg.channel_id.say(&ctx.http, "Panic mode has been deactivated. Turn it on with `bb-panic`").await;
+        }
+        _ => {
+            let m = "Broski... I need you to say `on` or `off` after that (if you don't put anything, I'll assume on)";
+            msg.channel_id.say(&ctx.http, m).await;
+            ()
+        }
+    }
 
     Ok(())
 }
@@ -164,6 +236,7 @@ async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 }
 
 #[command]
+#[required_permissions("ADMINISTRATOR")]
 async fn reset(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
@@ -210,8 +283,10 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
       - any member joining will be {}
 
     **General settings**
-    Ping spam limits are {}.
     {}.
+    Ping spam limits are {}.
+
+    All underlined items are configurable - run `bb-settings help` for more about that.
     "#,
         if settings.enabled {
             "**DISABLED!**"
@@ -232,16 +307,6 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
             }
             Action::Nothing => String::from("__left alone__ by me"),
         },
-        if Action::Nothing == settings.mentionaction {
-            String::from("__disabled__")
-        } else {
-            format!("__enabled__:\n      - Members will be __{}__ if they ping __{}__ users, __{}__ mentions, or __{}__ of either within __{}__ seconds", match settings.mentionaction {
-                Action::Ban => "banned",
-                Action::Kick => "kicked",
-                Action::Mute => "muted",
-                Action::Nothing => "this state is not reachable in code",
-            }, settings.usermentions, settings.rollmentions, settings.anymentions, settings.mentiontime)
-        },
         if let 0 = settings.logs {
             String::from("__No__ logging channel is configured")
         } else {
@@ -253,6 +318,16 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
                     n => format!("<@&{}>", n),
                 }
             )
+        },
+        if Action::Nothing == settings.mentionaction {
+            String::from("__disabled__")
+        } else {
+            format!("__enabled__:\n      - Members will be __{}__ if they ping __{}__ users, __{}__ mentions, or __{}__ of either within __{}__ seconds", match settings.mentionaction {
+                Action::Ban => "banned",
+                Action::Kick => "kicked",
+                Action::Mute => "muted",
+                Action::Nothing => "this state is not reachable in code",
+            }, settings.usermentions, settings.rollmentions, settings.anymentions, settings.mentiontime)
         }
     );
 
@@ -499,11 +574,10 @@ fn humanize_duration(mut secs: i64) -> String {
     secs -= s;
     let m = (secs % 3600) / 60;
     secs -= m * 60;
-    let h = (secs % (3600*24)) / 3600;
+    let h = (secs % (3600 * 24)) / 3600;
     secs -= h * (3600);
-    let d = (secs % (3600*24*365)) / (3600*24);
+    let d = (secs % (3600 * 24 * 365)) / (3600 * 24);
     secs -= d * (3600 * 24);
-    let y = secs/(3600 * 24 * 365);
+    let y = secs / (3600 * 24 * 365);
     format!("{}y {}d {}h {}m {}s", y, d, h, m, s)
 }
-

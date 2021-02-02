@@ -33,14 +33,14 @@ use std::{
 use serenity::prelude::*;
 use tokio::sync::Mutex;
 mod autopanic;
-mod db;
 mod commands;
+mod db;
 
-use crate::commands::*;
 use crate::autopanic::*;
+use crate::commands::*;
 use std::convert::TryInto;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::process::exit;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // A container type is created for inserting into the Client's `data`, which
 // allows for data to be accessible across all events and framework commands, or
@@ -81,7 +81,6 @@ impl EventHandler for Handler {
     async fn guild_member_addition(&self, ctx: Context, guild_id: GuildId, new_member: Member) {
         println!("new member joined: {}", new_member.user.name);
         {
-
             let mut data = ctx.data.write().await;
             let mut grammy = data
                 .get_mut::<autopanic::Gramma>()
@@ -101,7 +100,11 @@ impl EventHandler for Handler {
     }
 
     async fn message(&self, ctx: Context, new_message: Message) {
-        println!("Message! {}", &new_message.content);
+        if new_message.content.len() > 20_usize {
+            println!("Message! {}...", &new_message.content[..19]);
+        } else {
+            println!("Message! {}", &new_message.content);
+        }
         // we use the message timestamp instead of time::now because of potential lag of events
         let timestamp: u64 = new_message.timestamp.timestamp_millis().try_into().unwrap();
         let guild = new_message.guild_id.unwrap().0;
@@ -131,7 +134,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(about, ping, invite, die)] //, info, forceban, panic, status)]
+#[commands(about, ping, invite, die, panic)] //, info, forceban, status)]
 struct General;
 
 #[group]
@@ -148,7 +151,6 @@ struct General;
 #[default_command(show)]
 #[commands(reset)] //settings_help, set, reset)]
 struct Settings;
-
 
 #[help]
 // This replaces the information that a user can pass
@@ -250,7 +252,7 @@ async fn main() {
         .configure(|c| {
             c.with_whitespace(true)
                 .on_mention(Some(bot_id))
-                .prefix("bb&")
+                .prefix("bb-")
                 .case_insensitivity(true)
                 .allow_dm(false)
         })
@@ -269,7 +271,9 @@ async fn main() {
     let mut client = Client::builder(&token)
         .event_handler(Handler)
         .framework(framework)
-        .intents(GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::privileged()) // TODO: more of these!
+        .intents(
+            GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::privileged(),
+        ) // TODO: more of these!
         .await
         .expect("Err creating client");
 

@@ -7,8 +7,11 @@ use std::convert::TryInto;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serenity::model::channel::PrivateChannel;
+use serenity::model::event::EventType::GuildBanAdd;
+use serenity::model::guild::VerificationLevel;
+use serenity::model::id::{GuildId, ChannelId};
 use serenity::{
-    prelude::Mentionable,
     async_trait,
     client::bridge::gateway::{ShardId, ShardManager},
     framework::standard::{
@@ -19,19 +22,16 @@ use serenity::{
     },
     http::Http,
     model::{
-        channel::{Channel, Message, GuildChannel},
+        channel::{Channel, GuildChannel, Message},
         gateway::Ready,
         guild::Guild,
         id::UserId,
         permissions::Permissions,
         user::User,
     },
+    prelude::Mentionable,
     utils::{content_safe, ContentSafeOptions},
 };
-use serenity::model::event::EventType::GuildBanAdd;
-use serenity::model::id::GuildId;
-use serenity::model::guild::VerificationLevel;
-use serenity::model::channel::PrivateChannel;
 /*
 
 all times are stored as ms since unix epoch, as u64
@@ -105,7 +105,7 @@ pub async fn check_against_joins(ctx: &Context, guild: u64) {
     let max_users = settings.users as u64;
     let max_time = settings.time;
     let now = time_now();
-    let mut n= 0u64;
+    let mut n = 0u64;
     let mut latest_joiner_ts = 0u64;
     for (&timestamp, &user) in &mom.recent_users {
         if now - timestamp < (max_time * 1000) as u64 {
@@ -124,15 +124,21 @@ pub async fn check_against_joins(ctx: &Context, guild: u64) {
     if !mom.panicking {
         start_panicking(&ctx, mom, &settings, guild).await;
     }
-    mom.panic_end = now as i64 + (max_time * 1000 * 4) as i64;  // todo: note implementation here
+    mom.panic_end = now as i64 + (max_time * 1000 * 4) as i64; // todo: note implementation here
 
     if mom.panicking {
-        let g = GuildId(guild).to_guild_cached(&ctx.cache).await.expect("it should be cached bruh");
+        let g = GuildId(guild)
+            .to_guild_cached(&ctx.cache)
+            .await
+            .expect("it should be cached bruh");
         let user = UserId(*mom.recent_users.get(&latest_joiner_ts).expect("broski "));
-        let dms:Option<PrivateChannel> = match user.create_dm_channel(&ctx.http).await {
+        let dms: Option<PrivateChannel> = match user.create_dm_channel(&ctx.http).await {
             Ok(channel) => Some(channel),
             Err(why) => {
-                println!("Couldn't make dm channel to apologize to {} in guild {}", user.0, guild);
+                println!(
+                    "Couldn't make dm channel to apologize to {} in guild {}",
+                    user.0, guild
+                );
                 None
             }
         };
@@ -141,14 +147,16 @@ pub async fn check_against_joins(ctx: &Context, guild: u64) {
                 if let Some(channel) = dms {
                     channel.say(&ctx.http, "Unfortunately, the server you are trying to join is being raided, and you have been banned").await;
                 }
-                g.ban_with_reason(&ctx.http, user, 0, "auto ban: joined while raid ongoing").await;
+                g.ban_with_reason(&ctx.http, user, 0, "auto ban: joined while raid ongoing")
+                    .await;
                 // ban them
             }
             Action::Kick => {
                 if let Some(channel) = dms {
                     channel.say(&ctx.http, "Unfortunately, the server you are trying to join is being raided, and you have been kicked").await;
                 }
-                g.kick_with_reason(&ctx.http, user, "auto kick: joined while raid ongoing").await;
+                g.kick_with_reason(&ctx.http, user, "auto kick: joined while raid ongoing")
+                    .await;
                 // kick them
             }
             Action::Mute => {
@@ -173,9 +181,10 @@ pub async fn check_against_joins(ctx: &Context, guild: u64) {
                     }
                 }
             }
-            _ => ()
+            _ => (),
         };
-    } else {}
+    } else {
+    }
 }
 
 /// Check if if we are more than `dt_seconds` past a past timestamp
@@ -183,21 +192,48 @@ pub fn time_is_past(start: u64, dt_seconds: u64) -> bool {
     time_now() > start + 1000 * dt_seconds
 }
 
-async fn start_panicking(ctx: &Context, mom: &mut YourMama, settings: &Settings, guild_id: u64) {
+pub(crate) async fn stop_panicking(ctx: &Context, mom: &mut YourMama, settings: &Settings, guild_id: u64) {
+    println!("We stopping the panic broooooo");
+    mom.panicking = false;
+    if settings.logs > 0 {
+        match ChannelId(settings.logs).say(&ctx.http, "Panic mode has been deactivated").await {
+            Ok(_) => (),
+            Err(why) => println!("error printing stuff: {}", why)
+        }
+    }
+    GuildId(guild_id).edit(&ctx.http, |g|{
+        g.verification_level(mom.normal_verification_level)
+    }).await;
+}
+
+pub(crate) async fn start_panicking(ctx: &Context, mom: &mut YourMama, settings: &Settings, guild_id: u64) {
     println!("We starting to panic broooooo");
     mom.panicking = true;
+    match ctx.cache.guild(guild_id).await {
+        Some(g) => mom.normal_verification_level = g.verification_level,
+        None => println!("bruh problemssaoheunstahoesnuta")
+    }
+
     if let Some(channel) = ctx.cache.guild_channel(guild_id).await {
         if 0 < settings.notify {
-            let r = channel.say(&ctx.http, format!("bruh <@&{}> we are under a tack", settings.notify)).await;
+            let r = channel
+                .say(
+                    &ctx.http,
+                    format!("bruh <@&{}> we are under a tack", settings.notify),
+                )
+                .await;
         } else {
             channel.say(&ctx.http, "Bruh we are under a tack").await;
         }
     }
 
     let mut g = GuildId(guild_id);
-    match g.edit(&ctx.http, |g| {
-        g.verification_level(VerificationLevel::Higher)
-    }).await {
+    match g
+        .edit(&ctx.http, |g| {
+            g.verification_level(VerificationLevel::Higher)
+        })
+        .await
+    {
         Ok(_) => println!("set verification level of {} to High", g.0),
         Err(why) => println!("Error setting verification level of {}: {}", g.0, why),
     };
@@ -238,6 +274,7 @@ pub struct YourMama {
     pub rollpings: HashMap<u64, (usize, u64)>, // timestamp, number of pings, user
     pub panicking: bool,
     pub panic_end: i64,
+    pub normal_verification_level: VerificationLevel,
 }
 
 impl YourMama {
@@ -248,6 +285,7 @@ impl YourMama {
             rollpings: HashMap::new(),
             panicking: false,
             panic_end: -1,
+            normal_verification_level: VerificationLevel::Low,
         }
     }
 }
