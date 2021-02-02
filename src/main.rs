@@ -37,6 +37,7 @@ mod db;
 use crate::autopanic::*;
 use std::convert::TryInto;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::exit;
 
 // A container type is created for inserting into the Client's `data`, which
 // allows for data to be accessible across all events and framework commands, or
@@ -82,21 +83,24 @@ impl EventHandler for Handler {
 
     async fn guild_member_addition(&self, ctx: Context, guild_id: GuildId, new_member: Member) {
         println!("new member joined: {}", new_member.user.name);
-        let mut data = ctx.data.write().await;
-        let mut grammy = data
-            .get_mut::<autopanic::Gramma>()
-            .expect("Expected your momma in TypeMap.");
-        let mut mom = grammy.get(&guild_id.0);
-        mom.recent_users.insert(
-            new_member
-                .joined_at
-                .unwrap()
-                .timestamp_millis()
-                .try_into()
-                .unwrap(),
-            new_member.user.id.0,
-        );
-        check_against_joins(&ctx, mom, guild_id.0).await;
+        {
+
+            let mut data = ctx.data.write().await;
+            let mut grammy = data
+                .get_mut::<autopanic::Gramma>()
+                .expect("Expected your momma in TypeMap.");
+            let mut mom = grammy.get(&guild_id.0);
+            mom.recent_users.insert(
+                new_member
+                    .joined_at
+                    .unwrap()
+                    .timestamp_millis()
+                    .try_into()
+                    .unwrap(),
+                new_member.user.id.0,
+            );
+        }
+        check_against_joins(&ctx, guild_id.0).await;
     }
 
     async fn message(&self, ctx: Context, new_message: Message) {
@@ -130,7 +134,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(about, ping, upper_command)]
+#[commands(about, ping, upper_command, invite, die)]
 struct General;
 
 #[group]
@@ -315,11 +319,23 @@ async fn main() {
 }
 
 #[command]
-async fn invite(ctx: &Context, msg: &Message) -> CommandResult {
-    msg.channel_id.say(&ctx.http, "https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=18502").await?;
+async fn invite(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
+    msg.channel_id.say(&ctx.http, "<https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=18502>").await?;
     Ok(())
 }
 
+#[command]
+async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    if msg.author.id.0 == 275384719024193538 {
+        msg.channel_id.say(&ctx.http, "ok bye").await?;
+        ctx.shard.shutdown_clean();
+        exit(0);
+        // todo: make this work more
+    } else {
+        msg.channel_id.say(&ctx.http, "shut up pleb").await?;
+    }
+    Ok(())
+}
 #[command]
 // Limits the usage of this command to roles named:
 #[allowed_roles("mods", "ultimate neko")]

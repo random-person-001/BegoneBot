@@ -47,7 +47,7 @@ pub struct Blacklist {
 }
 
 /// Per-guild settings (aka a full row in the sql table, but with dif types)
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Settings {
     pub guild: u64,
     pub enabled: bool,

@@ -90,19 +90,23 @@ pub async fn check_against_pings(ctx: &Context, mom: &mut YourMama, guild: u64) 
     println!("I am totally checking for people pinging too much here");
 }
 
-pub async fn check_against_joins(ctx: &Context, mom: &mut YourMama, guild: u64) {
+pub async fn check_against_joins(ctx: &Context, guild: u64) {
     println!("I am totally checking for people joining too much here");
-
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
-
     let settings = dbcontext.fetch_settings(&guild).await.unwrap();
-    let max_users = settings.users;
+
+    let mut grammy = data
+        .get_mut::<Gramma>()
+        .expect("Expected your momma in TypeMap.");
+    let mut mom = grammy.get(&guild);
+
+    let max_users = settings.users as u64;
     let max_time = settings.time;
     let now = time_now();
-    let mut n = 0;
+    let mut n:u64 = 0;
     let mut latest_joiner_ts:u64 = 0;
     for (&timestamp, &user) in &mom.recent_users {
         if now - timestamp > (max_time * 1000) as u64 {
@@ -112,7 +116,6 @@ pub async fn check_against_joins(ctx: &Context, mom: &mut YourMama, guild: u64) 
             }
         }
     }
-    println!("Aaaaaaa why doesn't this print??"); // todo : solve this mystery
     println!("{:?}", mom);
     if n < max_users {
         return;
