@@ -179,11 +179,12 @@ I'm a bot that helps protect servers against raids."]
 // If the user is nothing but lacking a certain role, we just display it hence our variant is `Nothing`.
 #[lacking_role = "Nothing"]
 // The last `enum`-variant is `Strike`, which ~~strikes~~ a command.
-#[wrong_channel = "Strike"]
+//#[wrong_channel = "Nothing"]
 // Serenity will automatically analyse and generate a hint/tip explaining the possible
 // cases of ~~strikethrough-commands~~, but only if
 // `strikethrough_commands_tip_in_{dm, guild}` aren't specified.
 // If you pass in a value, it will be displayed instead.
+#[strikethrough_commands_tip_in_guild = ""]
 async fn my_help(
     context: &Context,
     msg: &Message,
