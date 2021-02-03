@@ -6,16 +6,15 @@ use serenity::{
         macros::{check, command},
         Args, CommandResult,
     },
-    model::prelude::{Mentionable, Message, UserId},
+    model::prelude::{Mentionable, Message, Permissions, UserId},
     prelude::{Context, SerenityError},
 };
 use std::convert::TryInto;
 use std::process::exit;
 
-
 #[command]
 async fn invite(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
-    msg.channel_id.say(&ctx.http, "my invite link is <https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=18503>").await?;
+    msg.channel_id.say(&ctx.http, "You can invite me with <https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=18503>").await?;
     Ok(())
 }
 
@@ -35,8 +34,15 @@ async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
 #[command]
 async fn about(ctx: &Context, msg: &Message) -> CommandResult {
+    let n = ctx.cache.guild_count().await;
     msg.channel_id
-        .say(&ctx.http, "This is a small antiraid bot in rust")
+        .say(
+            &ctx.http,
+            format!(
+                "This is a small antiraid bot in rust written by John Locke#2742 serving {} guilds",
+                n
+            ),
+        )
         .await?;
 
     Ok(())
@@ -50,16 +56,7 @@ async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
 }
 
 #[command]
-// Allow only administrators to call this:
 #[required_permissions("ADMINISTRATOR")]
-async fn cat(ctx: &Context, msg: &Message) -> CommandResult {
-    msg.channel_id.say(&ctx.http, ":cat:").await?;
-
-    // We can return one ticket to the bucket undoing the ratelimit.
-    Ok(())
-}
-
-#[command]
 async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let mut successes: u8 = 0;
     let mut fails: u8 = 0;
@@ -80,7 +77,7 @@ async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
             Err(why) => {
                 fails += 1;
                 args.advance();
-            },
+            }
         }
     }
     if fails == 0 {
@@ -88,7 +85,7 @@ async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
             msg.channel_id
                 .say(
                     &ctx.http,
-                    "Please specify some user IDs after the command (separated by spaces)"
+                    "Please specify some user IDs after the command, separated by spaces",
                 )
                 .await;
         } else {
@@ -110,27 +107,6 @@ async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
             )
             .await;
     }
-    Ok(())
-}
-
-#[command]
-#[description = "Sends an emoji with a dog."]
-async fn dog(ctx: &Context, msg: &Message) -> CommandResult {
-    msg.channel_id.say(&ctx.http, ":dog:").await?;
-
-    Ok(())
-}
-
-#[command]
-async fn bird(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let say_content = if args.is_empty() {
-        ":bird: can find animals for you.".to_string()
-    } else {
-        format!(":bird: could not find animal named: `{}`.", args.rest())
-    };
-
-    msg.channel_id.say(&ctx.http, say_content).await?;
-
     Ok(())
 }
 
@@ -191,6 +167,7 @@ async fn uinfo(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 }
 
 #[command]
+#[required_permissions("ADMINISTRATOR")]
 async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
     let guild_id = msg.guild_id.expect("infallible").0;
@@ -253,41 +230,75 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 }
 
 #[command]
+#[required_permissions("ADMINISTRATOR")]
+async fn options(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
+    let s = "    _Example:_ To set the raid panic to trigger when 3 people join in 4 seconds, send these two messages:
+`bb-settings set users 3`
+`bb-settings set time 4`
+
+_Example:_ To ping a roll named @Staff when a raid starts (assumes log channel has been set):
+`bb-settings set notify Staff`
+
+The following are the settings you can adjust:";
+    msg.channel_id.send_message(&ctx.http, |m| {
+        m.embed(|e| {
+            e.title("Configuring Settings");
+            e.description(s);
+            e.field("enabled", "whether automatic raid detection and prevention should occur. Input is either `true` or `false`", false);
+            e.field("action", "What to do to to new joining members during a raid. One of `ban` `kick` `mute` `nothing`", false);
+            e.field("users", "How many users it takes to trigger a raid panic. A number", false);
+            e.field("time", "When `users` join in this amount of seconds, a raid panic is triggered. A number", false);
+            e.field("logs", "What channel to post raid notifications. Is none by default. A blue channel name", false);
+            e.field("notify", "When a raid panic starts, this roll is pinged in the `logs` channel.  A roll id or mention or written name", false);
+            e.footer(|f| {
+                f.text("To check current settings, run just bb-settings")
+            });
+            e
+        })
+    }).await;
+    Ok(())
+}
+
+#[command]
+#[required_permissions("ADMINISTRATOR")]
 async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     if args.is_empty() {
-        msg.channel_id.say(&ctx.http, "I need some arguments. Run `bb-settings help` to see usage").await;
+        msg.channel_id
+            .say(
+                &ctx.http,
+                "I need some arguments. Run `bb-settings options` to see usage",
+            )
+            .await;
     }
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
-    let guild_id= msg.guild_id.expect("").0;
+    let guild_id = msg.guild_id.expect("").0;
     let setting_name = args.single::<String>().unwrap().to_lowercase();
 
     if args.is_empty() {
-        msg.channel_id.say(&ctx.http, "I need a value to set that to. Run `bb-settings help` for more");
-        return Ok(())
+        msg.channel_id.say(
+            &ctx.http,
+            "I need a value to set that to. Run `bb-settings options` for more",
+        );
+        return Ok(());
     }
     let choice = args.single::<String>().unwrap().to_lowercase();
 
-
-    match &setting_name[..] {
-        "enabled" => {
-            let choice = match &choice[..] {
-                "true" => {
-                    if dbcontext.set_enabled(&guild_id, true).await {
-                        msg.channel_id.say(&ctx.http, "Updated.").await?;
-                    };
-                }
-                "false" => {
-                    if dbcontext.set_enabled(&guild_id, false).await {
-                        msg.channel_id.say(&ctx.http, "Updated.").await?;
-                    }
-                }
-                _ => {
-                    msg.channel_id.say(&ctx.http, "That value didn't look right. It should be either `true` or `false`").await?;
-                }
-            };
+    let dbval: i64 = match &setting_name[..] {
+        "enabled" => match &choice[..] {
+            "true" => true as i64,
+            "false" => false as i64,
+            _ => {
+                msg.channel_id
+                    .say(
+                        &ctx.http,
+                        "That value didn't look right. It should be either `true` or `false`",
+                    )
+                    .await?;
+                return Ok(());
+            }
         },
         "action" => {
             let choice = match &choice[..] {
@@ -301,10 +312,6 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                     return Ok(());
                 }
             };
-            dbcontext
-                .set_attr(&guild_id, "action", choice.try_into().unwrap())
-                .await;
-            msg.channel_id.say(&ctx.http, ":+1: Updated");
 
             // Check the mute roll and stuff
             if let Some(settings) = dbcontext.fetch_settings(&guild_id).await {
@@ -330,9 +337,10 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             } else {
                 println!("uh no settings found");
             }
-        },
+            choice as i64
+        }
         "users" => {
-            let choice:u8 = match choice.parse() {
+            let choice: u8 = match choice.parse() {
                 Ok(n) => n,
                 Err(why) => {
                     msg.channel_id.say(&ctx.http, "Sorry, that wasn't recognized as a reasonable number of users to join in a given time.").await?;
@@ -348,19 +356,8 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                     .await?;
                 return Ok(());
             }
-            return if dbcontext
-                .set_attr(&guild_id, "users", choice as i64)
-                .await
-            {
-                msg.channel_id.say(&ctx.http, "Updated.").await?;
-                Ok(())
-            } else {
-                msg.channel_id
-                    .say(&ctx.http, "Problems arose when trying to update settings.")
-                    .await?;
-                Ok(())
-            }
-        },
+            choice as i64
+        }
         "time" => {
             let choice: u32 = match choice.parse() {
                 Ok(n) => n,
@@ -378,19 +375,8 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                     .await?;
                 return Ok(());
             }
-            return if dbcontext
-                .set_attr(&guild_id, "time", choice as i64)
-                .await
-            {
-                msg.channel_id.say(&ctx.http, "Updated.").await?;
-                Ok(())
-            } else {
-                msg.channel_id
-                    .say(&ctx.http, "Problems arose when trying to update settings.")
-                    .await?;
-                Ok(())
-            }
-        },
+            choice as i64
+        }
         "logs" => {
             let choice = match id_from_mention(&choice[..]) {
                 Some(id) => id,
@@ -400,33 +386,58 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                     return Ok(());
                 }
             };
-
-            return if dbcontext
-                .set_attr(&guild_id, "logs", choice as i64)
-                .await
-            {
-                msg.channel_id.say(&ctx.http, "Updated.").await?;
-                Ok(())
+            choice as i64
+        }
+        "muteroll" => {
+            if let Some(h) = get_roll_from_set_command(&ctx, &msg, &choice).await {
+                h
             } else {
-                msg.channel_id
-                    .say(&ctx.http, "Problems arose when trying to update settings.")
-                    .await?;
-                Ok(())
+                return Ok(());
             }
-        },
-        "muteroll" => (),
-        "rollmentions" => (),
-        "usermentions" => (),
-        "anymentions" => (),
-        "mentionaction" => (),
-        "mentiontime" => (),
-        "notify" => (),
+        }
+        "rollmentions" => 0,
+        "usermentions" => 0,
+        "anymentions" => 0,
+        "mentionaction" => 0,
+        "mentiontime" => 0,
+        "notify" => {
+            if let Some(h) = get_roll_from_set_command(&ctx, &msg, &choice).await {
+                h
+            } else {
+                return Ok(());
+            }
+        }
         _ => {
-            msg.channel_id.say(&ctx.http, "I didn't recognize that setting you tried to change. Run `bb-settings help` to see usage").await;
+            msg.channel_id.say(&ctx.http, "I didn't recognize that setting you tried to change. Run `bb-settings options` to see usage").await;
             return Ok(());
-        },
+        }
+    };
+
+    if dbcontext.set_attr(&guild_id, &*setting_name, dbval).await {
+        msg.channel_id.say(&ctx.http, ":+1: Updated.").await?;
+    } else {
+        msg.channel_id
+            .say(&ctx.http, "Problems arose when saving those changes to settings. If this persists, try `bb-settings reset`")
+            .await?;
     }
     Ok(())
+}
+
+async fn get_roll_from_set_command(ctx: &Context, msg: &Message, choice: &String) -> Option<i64> {
+    Some(
+        (if let Some(rol) = get_roll_id_by_name(&ctx, &msg, &choice[..]).await {
+            rol
+        } else if let Some(rol) = get_roll_id_by_name(&ctx, &msg, &choice.to_lowercase()[..]).await
+        {
+            rol
+        } else if let Some(rol) = id_from_mention(&choice[..]) {
+            rol
+        } else {
+            let s = "Broski that didn't look like a roll that you have here :(";
+            msg.channel_id.say(&ctx.http, s).await;
+            return None;
+        }) as i64,
+    )
 }
 
 #[command]
@@ -443,17 +454,33 @@ async fn reset(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
     if dbcontext.add_guild(&guild).await {
         msg.channel_id
-            .say(&ctx.http, "Successfully reset settings")
+            .say(&ctx.http, "Successfully reset all settings")
             .await?;
     } else {
-        let s = "Problems were encountered while attempting to reset settings";
+        let s = "Problems were encountered while attempting to reset all settings";
         msg.channel_id.say(&ctx.http, s).await?;
     }
     Ok(())
 }
 
 #[command]
+#[required_permissions("ADMINISTRATOR")]
 async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+    // redundant perm check is neccissary cuz lib bypasses the perms when running a group default command
+    let g = ctx
+        .cache
+        .guild(msg.guild_id.expect("wtf"))
+        .await
+        .expect("wtf bro");
+    match g.member_permissions(&ctx.http, msg.author.id).await {
+        Ok(p) => {
+            if !p.contains(Permissions::ADMINISTRATOR) {
+                return Ok(());
+            }
+        }
+        Err(_) => return Ok(()),
+    };
+
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
@@ -480,7 +507,7 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     {}.
     Ping spam limits are {}.
 
-    All underlined items are configurable - run `bb-settings help` for more about that.
+    All underlined items are configurable - run `bb-settings options` for more about that.
     "#,
         if settings.enabled {
             "**DISABLED!**"
@@ -514,7 +541,7 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
             )
         },
         if Action::Nothing == settings.mentionaction {
-            String::from("__disabled__")
+            String::from("__disabled__ - it isn't implemented yet")
         } else {
             format!("__enabled__:\n      - Members will be __{}__ if they ping __{}__ users, __{}__ mentions, or __{}__ of either within __{}__ seconds", match settings.mentionaction {
                 Action::Ban => "banned",
@@ -527,103 +554,6 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 
     msg.channel_id.say(&ctx.http, s).await?;
     Ok(())
-}
-
-#[command]
-async fn time(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let mut data = ctx.data.write().await;
-    let mut dbcontext = data
-        .get_mut::<MyDbContext>()
-        .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-    let choice = match args.clone().single::<u32>() {
-        Ok(n) => n,
-        Err(why) => {
-            let s = "Sorry, that wasn't recognized as a reasonable amount of time in seconds (no fractions or decimals please)";
-            msg.channel_id.say(&ctx.http, s).await?;
-            return Ok(());
-        }
-    };
-    if choice < 1 {
-        let s = "That would kick anyone trying to join, so imma say nope to that chief.";
-        msg.channel_id.say(&ctx.http, s).await?;
-        return Ok(());
-    }
-    if dbcontext
-        .set_attr(&guild, "time", choice.try_into().unwrap())
-        .await
-    {
-        msg.channel_id.say(&ctx.http, "Updated.").await?;
-        Ok(())
-    } else {
-        msg.channel_id
-            .say(&ctx.http, "Problems arose when trying to update settings.")
-            .await?;
-        Ok(())
-    }
-}
-
-
-#[command]
-async fn setmuteroll(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let mut data = ctx.data.write().await;
-    let mut dbcontext = data
-        .get_mut::<MyDbContext>()
-        .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-    let choice = args.clone().single::<String>().unwrap();
-
-    let roll: u64;
-    if let Some(rol) = get_roll_id_by_name(&ctx, &msg, &choice[..]).await {
-        roll = rol;
-    } else if let Some(rol) = get_roll_id_by_name(&ctx, &msg, &choice.to_lowercase()[..]).await {
-        roll = rol;
-    } else if let Some(rol) = id_from_mention(&choice[..]) {
-        roll = rol;
-    } else {
-        let s = "Broski that didn't look like a roll that you have here :(";
-        msg.channel_id.say(&ctx.http, s).await?;
-        return Ok(());
-    };
-
-    if dbcontext
-        .set_attr(&guild, "muteroll", roll.try_into().unwrap())
-        .await
-    {
-        msg.channel_id.say(&ctx.http, "Updated.").await?;
-        Ok(())
-    } else {
-        let s = "Problems arose when trying to update settings.";
-        msg.channel_id.say(&ctx.http, s).await?;
-        Ok(())
-    }
-}
-
-#[command]
-async fn disable(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
-    let mut data = ctx.data.write().await;
-    let mut dbcontext = data
-        .get_mut::<MyDbContext>()
-        .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-    if dbcontext.set_enabled(&guild, false).await {
-        msg.channel_id.say(&ctx.http, "Updated.").await?;
-        Ok(())
-    } else {
-        msg.channel_id
-            .say(&ctx.http, "Problems arose when trying to update settings.")
-            .await?;
-        Ok(())
-    }
 }
 
 /// Retrieves the nth `char` of a `&str`
@@ -661,7 +591,9 @@ fn id_from_mention(s: &str) -> Option<u64> {
 async fn get_roll_id_by_name(ctx: &Context, msg: &Message, name: &str) -> Option<u64> {
     if let Some(guild_id) = msg.guild_id {
         if let Some(guild) = guild_id.to_guild_cached(&ctx).await {
+            println!("guild is cached ");
             if let Some(role) = guild.role_by_name(name) {
+                println!("yeeeeeeetus");
                 return Some(role.id.0);
             }
         }

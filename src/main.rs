@@ -76,6 +76,7 @@ impl EventHandler for Handler {
             println!("Creating a new settings row for guild {}", id);
             dbcontext.add_guild(id).await; // also adds to cache
         };
+        set_status(&ctx).await;
     }
 
     async fn guild_member_addition(&self, ctx: Context, guild_id: GuildId, new_member: Member) {
@@ -128,9 +129,15 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn ready(&self, _: Context, ready: Ready) {
+    async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
     }
+}
+
+async fn set_status(ctx: &Context) {
+    ctx.shard.set_status(OnlineStatus::DoNotDisturb);
+    let s = format!("to {} guilds | bb-help", ctx.cache.guild_count().await);
+    ctx.shard.set_activity(Some(Activity::listening(&*s)));
 }
 
 #[group]
@@ -149,14 +156,14 @@ struct General;
 #[summary = "Adjust settings"]
 // Sets a command that will be executed if only a group-prefix was passed.
 #[default_command(show)]
-#[commands(reset, set)] //settings_help)]
+#[commands(reset, set, options)]
 struct Settings;
 
 #[help]
 // This replaces the information that a user can pass
 // a command-name as argument to gain specific information about it.
 #[individual_command_tip = "Hello! こんにちは！Hola! Bonjour! 您好! 안녕하세요~\n\n\
-If you want more information about a specific command, just pass the command as argument."]
+I'm a bot that helps protect servers against raids."]
 // Some arguments require a `{}` in order to replace it with contextual information.
 // In this case our `{}` refers to a command's name.
 #[command_not_found_text = "Could not find: `{}`."]

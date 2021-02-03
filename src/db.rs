@@ -133,7 +133,7 @@ impl MyDbContext {
                 rollmentions INTEGER DEFAULT 4,
                 usermentions INTEGER DEFAULT 6,
                 anymentions INTEGER DEFAULT 8,
-                mentionaction INTEGER DEFAULT 1,
+                mentionaction INTEGER DEFAULT 3,
                 mentiontime INTEGER DEFAULT 5,
                 notify INTEGER DEFAULT 0
                 );
