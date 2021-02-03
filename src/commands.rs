@@ -12,6 +12,7 @@ use serenity::{
 use std::convert::TryInto;
 use std::process::exit;
 
+
 #[command]
 async fn invite(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
     msg.channel_id.say(&ctx.http, "my invite link is <https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=18503>").await?;
@@ -252,54 +253,178 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 }
 
 #[command]
-async fn action(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let choice = args.clone().single::<String>().unwrap().to_lowercase();
+async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    if args.is_empty() {
+        msg.channel_id.say(&ctx.http, "I need some arguments. Run `bb-settings help` to see usage").await;
+    }
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-    let choice = match &choice[..] {
-        "ban" => Action::Ban,
-        "kick" => Action::Kick,
-        "mute" => Action::Mute,
-        "nothing" => Action::Nothing,
-        default => {
-            let s = "Sorry that wasn't recognized. Recognized options are ban, kick, or mute";
-            msg.channel_id.say(&ctx.http, s).await?;
-            return Ok(());
-        }
-    };
-    dbcontext
-        .set_attr(&guild, "action", choice.try_into().unwrap())
-        .await;
+    let guild_id= msg.guild_id.expect("").0;
+    let setting_name = args.single::<String>().unwrap().to_lowercase();
 
-    msg.channel_id.say(&ctx.http, "Updated.").await?;
-    if let Some(settings) = dbcontext.fetch_settings(&guild).await {
-        if choice == Action::Mute && settings.muteroll == 0 {
-            let mut roll: u64 = 0;
-            if let Some(rol) = get_roll_id_by_name(&ctx, &msg, "muted").await {
-                roll = rol;
-            } else if let Some(rol) = get_roll_id_by_name(&ctx, &msg, "Muted").await {
-                roll = rol;
-            }
+    if args.is_empty() {
+        msg.channel_id.say(&ctx.http, "I need a value to set that to. Run `bb-settings help` for more");
+        return Ok(())
+    }
+    let choice = args.single::<String>().unwrap().to_lowercase();
 
-            if roll > 0 {
-                let s = "Automatically detected the Muted roll here";
-                msg.channel_id.say(&ctx.http, s).await?;
-                dbcontext
-                    .set_attr(&guild, "muteroll", roll.try_into().unwrap())
-                    .await;
+
+    match &setting_name[..] {
+        "enabled" => {
+            let choice = match &choice[..] {
+                "true" => {
+                    if dbcontext.set_enabled(&guild_id, true).await {
+                        msg.channel_id.say(&ctx.http, "Updated.").await?;
+                    };
+                }
+                "false" => {
+                    if dbcontext.set_enabled(&guild_id, false).await {
+                        msg.channel_id.say(&ctx.http, "Updated.").await?;
+                    }
+                }
+                _ => {
+                    msg.channel_id.say(&ctx.http, "That value didn't look right. It should be either `true` or `false`").await?;
+                }
+            };
+        },
+        "action" => {
+            let choice = match &choice[..] {
+                "ban" => Action::Ban,
+                "kick" => Action::Kick,
+                "mute" => Action::Mute,
+                "nothing" => Action::Nothing,
+                default => {
+                    let s = "Sorry that option wasn't recognized. Recognized options are `ban`, `kick`, `mute`, or `nothing`.";
+                    msg.channel_id.say(&ctx.http, s).await?;
+                    return Ok(());
+                }
+            };
+            dbcontext
+                .set_attr(&guild_id, "action", choice.try_into().unwrap())
+                .await;
+            msg.channel_id.say(&ctx.http, ":+1: Updated");
+
+            // Check the mute roll and stuff
+            if let Some(settings) = dbcontext.fetch_settings(&guild_id).await {
+                if choice == Action::Mute && settings.muteroll == 0 {
+                    let mut roll: u64 = 0;
+                    if let Some(rol) = get_roll_id_by_name(&ctx, &msg, "muted").await {
+                        roll = rol;
+                    } else if let Some(rol) = get_roll_id_by_name(&ctx, &msg, "Muted").await {
+                        roll = rol;
+                    }
+
+                    if roll > 0 {
+                        let s = "Automatically detected the Muted roll here";
+                        msg.channel_id.say(&ctx.http, s).await?;
+                        dbcontext
+                            .set_attr(&guild_id, "muteroll", roll.try_into().unwrap())
+                            .await;
+                    } else {
+                        let s = "Please specify which roll to give members to mute them by running `bb-settings set muteroll @theroll`. Until then I cannot help you in a raid.";
+                        msg.channel_id.say(&ctx.http, s).await?;
+                    }
+                }
             } else {
-                let s = "Please specify which roll to give members to mute them by running antiraid setmuteroll @thatroll. Until then I cannot help you in a raid.";
-                msg.channel_id.say(&ctx.http, s).await?;
+                println!("uh no settings found");
             }
-        }
-    } else {
-        println!("uh no settings found");
+        },
+        "users" => {
+            let choice:u8 = match choice.parse() {
+                Ok(n) => n,
+                Err(why) => {
+                    msg.channel_id.say(&ctx.http, "Sorry, that wasn't recognized as a reasonable number of users to join in a given time.").await?;
+                    return Ok(());
+                }
+            };
+            if choice <= 1 {
+                msg.channel_id
+                    .say(
+                        &ctx.http,
+                        "That would kick anyone trying to join, so imma say nope to that chief.",
+                    )
+                    .await?;
+                return Ok(());
+            }
+            return if dbcontext
+                .set_attr(&guild_id, "users", choice as i64)
+                .await
+            {
+                msg.channel_id.say(&ctx.http, "Updated.").await?;
+                Ok(())
+            } else {
+                msg.channel_id
+                    .say(&ctx.http, "Problems arose when trying to update settings.")
+                    .await?;
+                Ok(())
+            }
+        },
+        "time" => {
+            let choice: u32 = match choice.parse() {
+                Ok(n) => n,
+                Err(why) => {
+                    msg.channel_id.say(&ctx.http, "Sorry, that wasn't recognized as a reasonable amount of time for users to join in.").await?;
+                    return Ok(());
+                }
+            };
+            if choice <= 1 {
+                msg.channel_id
+                    .say(
+                        &ctx.http,
+                        "Gotta be bigger, so imma say nope to that chief.",
+                    )
+                    .await?;
+                return Ok(());
+            }
+            return if dbcontext
+                .set_attr(&guild_id, "time", choice as i64)
+                .await
+            {
+                msg.channel_id.say(&ctx.http, "Updated.").await?;
+                Ok(())
+            } else {
+                msg.channel_id
+                    .say(&ctx.http, "Problems arose when trying to update settings.")
+                    .await?;
+                Ok(())
+            }
+        },
+        "logs" => {
+            let choice = match id_from_mention(&choice[..]) {
+                Some(id) => id,
+                None => {
+                    let s = "Bro that didn't look like a normal channel message :(";
+                    msg.channel_id.say(&ctx.http, s).await?;
+                    return Ok(());
+                }
+            };
+
+            return if dbcontext
+                .set_attr(&guild_id, "logs", choice as i64)
+                .await
+            {
+                msg.channel_id.say(&ctx.http, "Updated.").await?;
+                Ok(())
+            } else {
+                msg.channel_id
+                    .say(&ctx.http, "Problems arose when trying to update settings.")
+                    .await?;
+                Ok(())
+            }
+        },
+        "muteroll" => (),
+        "rollmentions" => (),
+        "usermentions" => (),
+        "anymentions" => (),
+        "mentionaction" => (),
+        "mentiontime" => (),
+        "notify" => (),
+        _ => {
+            msg.channel_id.say(&ctx.http, "I didn't recognize that setting you tried to change. Run `bb-settings help` to see usage").await;
+            return Ok(());
+        },
     }
     Ok(())
 }
@@ -405,46 +530,6 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 }
 
 #[command]
-async fn users(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let choice = match args.clone().single::<u8>() {
-        Ok(n) => n,
-        Err(why) => {
-            msg.channel_id.say(&ctx.http, "Sorry, that wasn't recognized as a reasonable number of users to join in a given time.").await?;
-            return Ok(());
-        }
-    };
-    if choice <= 1 {
-        msg.channel_id
-            .say(
-                &ctx.http,
-                "That would kick anyone trying to join, so imma say nope to that chief.",
-            )
-            .await?;
-        return Ok(());
-    }
-    let mut data = ctx.data.write().await;
-    let mut dbcontext = data
-        .get_mut::<MyDbContext>()
-        .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-    if dbcontext
-        .set_attr(&guild, "users", choice.try_into().unwrap())
-        .await
-    {
-        msg.channel_id.say(&ctx.http, "Updated.").await?;
-        Ok(())
-    } else {
-        msg.channel_id
-            .say(&ctx.http, "Problems arose when trying to update settings.")
-            .await?;
-        Ok(())
-    }
-}
-
-#[command]
 async fn time(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
@@ -481,39 +566,6 @@ async fn time(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     }
 }
 
-#[command]
-async fn logs(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let mut data = ctx.data.write().await;
-    let mut dbcontext = data
-        .get_mut::<MyDbContext>()
-        .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-    let choice = args.clone().single::<String>().unwrap();
-    let choice = match id_from_mention(&choice[..]) {
-        Some(id) => id,
-        None => {
-            let s = "Bro that didn't look like a normal channel message :(";
-            msg.channel_id.say(&ctx.http, s).await?;
-            return Ok(());
-        }
-    };
-
-    if dbcontext
-        .set_attr(&guild, "logs", choice.try_into().unwrap())
-        .await
-    {
-        msg.channel_id.say(&ctx.http, "Updated.").await?;
-        Ok(())
-    } else {
-        msg.channel_id
-            .say(&ctx.http, "Problems arose when trying to update settings.")
-            .await?;
-        Ok(())
-    }
-}
 
 #[command]
 async fn setmuteroll(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
@@ -553,26 +605,6 @@ async fn setmuteroll(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
     }
 }
 
-#[command]
-async fn enable(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
-    let mut data = ctx.data.write().await;
-    let mut dbcontext = data
-        .get_mut::<MyDbContext>()
-        .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-    if dbcontext.set_enabled(&guild, true).await {
-        msg.channel_id.say(&ctx.http, "Updated.").await?;
-        Ok(())
-    } else {
-        msg.channel_id
-            .say(&ctx.http, "Problems arose when trying to update settings.")
-            .await?;
-        Ok(())
-    }
-}
 #[command]
 async fn disable(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;

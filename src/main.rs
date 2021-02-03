@@ -149,7 +149,7 @@ struct General;
 #[summary = "Adjust settings"]
 // Sets a command that will be executed if only a group-prefix was passed.
 #[default_command(show)]
-#[commands(reset)] //settings_help, set, reset)]
+#[commands(reset, set)] //settings_help)]
 struct Settings;
 
 #[help]
