@@ -13,12 +13,6 @@ use std::convert::TryInto;
 use std::process::exit;
 
 #[command]
-async fn invite(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
-    msg.channel_id.say(&ctx.http, "You can invite me with <https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=18503>").await?;
-    Ok(())
-}
-
-#[command]
 async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     if msg.author.id.0 == 275384719024193538 {
         msg.channel_id.say(&ctx.http, "ok bye").await?;
@@ -35,7 +29,8 @@ async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 #[command]
 async fn about(ctx: &Context, msg: &Message) -> CommandResult {
     let c = format!(
-        "I'm a small antiraid bot in rust written by John Locke#2742 serving {} guilds",
+        "I'm a small antiraid bot in rust written by John Locke#2742 serving {} guilds\n\
+        You can invite me with <https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=18503>",
         ctx.cache.guild_count().await
     );
     msg.channel_id.say(&ctx.http, c).await?;
@@ -43,13 +38,13 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
 }
 
 #[command]
-// Limit command usage to guilds.
 async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
     msg.channel_id.say(&ctx.http, "Pong!").await?;
     Ok(())
 }
 
 #[command]
+#[required_permissions("ADMINISTRATOR")]
 async fn blacklist_show(ctx: &Context, msg: &Message, args:Args) -> CommandResult{
     let data = ctx.data.write().await;
     let dbcontext = data
@@ -66,21 +61,27 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args:Args) -> CommandResul
         .send_message(&ctx.http, |m| {
             m.embed(|e| {
                 e.title("Current Blacklist" );
-                e.description("these are current blacklist items");
+                e.color(0x070707);
+                e.description(" \
+                 • To adjust what happens when a member joins who matches a blacklist item, use `bb-settings set blacklistaction` with `ban`, `kick`, `mute`, or `nothing` at the end (default is kick). \n \
+                 • To blacklist any users who are named EvilBotnet, run `bb-blacklist add name EvilBotnet` \n \
+                 • To blacklist anyone named like DMSpammer4 or DMSpammer87, run `bb-blacklist add regexname DMSpammer\\d+` \
+                Regex is extremely powerful, and there are many references on the web to help you. \
+                \n
+                 • If you'd like to remove an item, `bb-blacklist remove` will be your friend. \n\
+                 • If you'd like to remove the first entry of the regex name blacklist, run `bb-blacklist remove regexname 1` \
+                \n
+                When talking about these lists in commands (like those examples above), call them `name` `regexname` and `avatar` respectively. \
+                ");
                 e.field("Simple name blacklist",
-                format!("`{:?}`", s.simplename),
+                format!("(will match username exactly)\n`{:?}`", s.simplename),
                 false);
                 e.field("Regex name blacklist",
-                format!("`{:?}`", s.regexname),
+                format!("(will match username by regex)\n`{:?}`", s.regexname),
                 false);
                 e.field("Avatar blacklist",
-                format!("`{:?}`", s.avatar),
+                format!("(will match avatar)\n`{:?}`", s.avatar),
                 false);
-                //e.thumbnail(u.face());
-                e.footer(|f| {
-                    f.text(format!("asoentuh"));
-                    f
-                });
                 e
             });
             m
@@ -90,6 +91,7 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args:Args) -> CommandResul
 }
 
 #[command]
+#[required_permissions("ADMINISTRATOR")]
 async fn add(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
@@ -129,6 +131,7 @@ async fn add(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
 }
 
 #[command]
+#[required_permissions("ADMINISTRATOR")]
 /// usage: bb-blacklist remove nameregex 4 to run settings.blacklist[3].pop()
 async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
     let mut data = ctx.data.write().await;
@@ -195,7 +198,6 @@ async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
             }
         }
         _ => {
-            println!("noetuhsotnhausnohtusn");
             msg.channel_id.say(&ctx.http, "That option was not recognized. Acceptable inputs are `name` `regexname` `avatar`").await;
             return Ok(());
         }
@@ -207,34 +209,6 @@ async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
     };
     Ok(())
 }
-
-#[command]
-#[required_permissions("ADMINISTRATOR")]
-async fn bl(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let mut data = ctx.data.write().await;
-    let mut dbcontext = data
-        .get_mut::<MyDbContext>()
-        .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-    let mut s = dbcontext.get_settings(&guild).await.expect("hmm").blacklist.clone();
-    s.avatar.push(String::from("the last airbender"));
-
-
-
-    if dbcontext.save_blacklist(&guild, s).await {
-        msg.channel_id
-            .say(&ctx.http, "Successfully did the thing")
-            .await?;
-    } else {
-        let s = "Problems were encountered while attempting to do stuff";
-        msg.channel_id.say(&ctx.http, s).await?;
-    }
-    Ok(())
-}
-
 
 #[command]
 #[required_permissions("ADMINISTRATOR")]
@@ -454,6 +428,7 @@ The following are the settings you can adjust:";
             e.field("time", "When `users` join in this amount of seconds, a raid panic is triggered. A number", false);
             e.field("logs", "What channel to post raid notifications. Is none by default. A blue channel name", false);
             e.field("notify", "When a raid panic starts, this roll is pinged in the `logs` channel.  A roll id or mention or written name", false);
+            e.field("blacklistaction", "When a new member joins who matches the blacklist, this will be done to them. One of `ban` `kick` `mute` `nothing`", false);
             e.footer(|f| {
                 f.text("To check current settings, run just bb-settings")
             });
@@ -611,6 +586,20 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 return Ok(());
             }
         }
+        "blacklistaction" => {
+            let choice = match &choice[..] {
+                "ban" => Action::Ban,
+                "kick" => Action::Kick,
+                "mute" => Action::Mute,
+                "nothing" => Action::Nothing,
+                default => {
+                    let s = "Sorry that option wasn't recognized. Recognized options are `ban`, `kick`, `mute`, or `nothing`.";
+                    msg.channel_id.say(&ctx.http, s).await?;
+                    return Ok(());
+                }
+            };
+            choice as i64
+        }
         _ => {
             msg.channel_id.say(&ctx.http, "I didn't recognize that setting you tried to change. Run `bb-settings options` to see usage").await;
             return Ok(());
@@ -689,11 +678,11 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     Ping spam limits are {}.
 
     **Blacklists:**
-    New users with these usernames or avatars will be {}
-    username, simple: {} entries
-    username, regex: {} entries
-    avatar: {} entries
-    Run `bb-blacklist` to see them
+    Newly joining members with these usernames or avatars will be __{}__
+    username, simple: __{} entries__
+    username, regex: __{} entries__
+    avatar: __{} entries__
+    Run `bb-blacklist` to see them and learn how to change them.
 
     All underlined items are configurable - run `bb-settings options` for more about that.
     "#,

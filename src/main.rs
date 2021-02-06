@@ -142,8 +142,14 @@ async fn set_status(ctx: &Context) {
 }
 
 #[group]
-#[commands(about, ping, invite, die, panic, uinfo, forceban)] // status)]
+#[summary = "Good commands to have around"]
+#[commands(panic, uinfo, forceban)]
 struct General;
+
+#[group]
+#[summary = "You probably can ignore these"]
+#[commands(about, ping, die)] // status)]
+struct Meta;
 
 #[group]
 // Sets multiple prefixes for a group.
@@ -154,15 +160,17 @@ struct General;
 // e.g. via help using the group-name or one of its prefixes.
 #[description = "Adjust settings"]
 // Summary only appears when listing multiple groups.
-#[summary = "Adjust settings"]
+#[summary = "Adjust settings. Run bb-settings so see them"]
 // Sets a command that will be executed if only a group-prefix was passed.
 #[default_command(show)]
-#[commands(reset, set, options, bl)]
+#[commands(reset, set, options)]
 struct Settings;
 
 #[group]
 #[prefixes("blacklist", "bl")]
-#[commands(remove, add, blacklist_show)]
+#[summary = "Blacklist for incoming members. Run bb-blacklist for more"]
+#[default_command(blacklist_show)]
+#[commands(remove, add)]
 struct Blacklist;
 
 #[help]
@@ -281,7 +289,8 @@ async fn main() {
         .help(&MY_HELP)
         .group(&GENERAL_GROUP)
         .group(&BLACKLIST_GROUP)
-        .group(&SETTINGS_GROUP);
+        .group(&SETTINGS_GROUP)
+        .group(&META_GROUP);
 
     let mut client = Client::builder(&token)
         .event_handler(Handler)
