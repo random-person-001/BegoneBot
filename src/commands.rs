@@ -34,17 +34,11 @@ async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
 #[command]
 async fn about(ctx: &Context, msg: &Message) -> CommandResult {
-    let n = ctx.cache.guild_count().await;
-    msg.channel_id
-        .say(
-            &ctx.http,
-            format!(
-                "This is a small antiraid bot in rust written by John Locke#2742 serving {} guilds",
-                n
-            ),
-        )
-        .await?;
-
+    let c = format!(
+        "I'm a small antiraid bot in rust written by John Locke#2742 serving {} guilds",
+        ctx.cache.guild_count().await
+    );
+    msg.channel_id.say(&ctx.http, c).await?;
     Ok(())
 }
 
@@ -56,7 +50,217 @@ async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
 }
 
 #[command]
+async fn blacklist_show(ctx: &Context, msg: &Message, args:Args) -> CommandResult{
+    let data = ctx.data.write().await;
+    let dbcontext = data
+        .get::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+    let guild: u64 = match msg.guild_id {
+        Some(id) => id.0,
+        None => 0,
+    };
+    let s = &dbcontext.get_settings(&guild).await.expect("hmm").blacklist;
+
+    let msg = msg
+        .channel_id
+        .send_message(&ctx.http, |m| {
+            m.embed(|e| {
+                e.title("Current Blacklist" );
+                e.description("these are current blacklist items");
+                e.field("Simple name blacklist",
+                format!("`{:?}`", s.simplename),
+                false);
+                e.field("Regex name blacklist",
+                format!("`{:?}`", s.regexname),
+                false);
+                e.field("Avatar blacklist",
+                format!("`{:?}`", s.avatar),
+                false);
+                //e.thumbnail(u.face());
+                e.footer(|f| {
+                    f.text(format!("asoentuh"));
+                    f
+                });
+                e
+            });
+            m
+        })
+        .await;
+    Ok(())
+}
+
+#[command]
+async fn add(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
+    let mut data = ctx.data.write().await;
+    let mut dbcontext = data
+        .get_mut::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+    let guild: u64 = match msg.guild_id {
+        Some(id) => id.0,
+        None => 0,
+    };
+    let mut s = dbcontext.get_settings(&guild).await.expect("hmm").blacklist.clone();
+
+
+    if args.len() != 2 {
+        println!("{:?}", args);
+        msg.channel_id.say(&ctx.http, "I need exactly two things specified after this: which list you're adding to, and the item to add.").await;
+        return Ok(());
+    }
+
+    let which_list  = args.single::<String>().unwrap();
+    let new_item  = args.single::<String>().unwrap();
+
+    match &*which_list {
+        "name" => s.simplename.push(new_item),
+        "regexname" => s.regexname.push(new_item),
+        "avatar" => s.avatar.push(new_item),
+        _ => {
+            msg.channel_id.say(&ctx.http, "Broski....... please specify the blacklist you're trying to add to here. It can be one of `name` `regexname` `avatar`").await;
+            return Ok(())
+        }
+    };
+    if dbcontext.save_blacklist(&guild, s).await {
+        msg.channel_id.say(&ctx.http, ":+1: Added").await;
+    } else {
+        msg.channel_id.say(&ctx.http, "There was a problem saving that setting").await;
+    }
+    Ok(())
+}
+
+#[command]
+/// usage: bb-blacklist remove nameregex 4 to run settings.blacklist[3].pop()
+async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
+    let mut data = ctx.data.write().await;
+    let mut dbcontext = data
+        .get_mut::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+    let guild: u64 = match msg.guild_id {
+        Some(id) => id.0,
+        None => 0,
+    };
+
+    if args.len() != 2 {
+        println!("{:?}", args);
+        msg.channel_id.say(&ctx.http, "I need exactly two things specified after this: which list you're removing from, and the index of the item you want to remove.").await;
+        return Ok(());
+    }
+
+
+    let which_list:String = args.single::<String>().unwrap();
+
+
+    let index = match args.single::<usize>() {
+        Ok(i) => i,
+        Err(_) => {
+            msg.channel_id.say(&ctx.http, "Oops I need the index for ");
+            return Ok(());
+        }
+    };
+    let mut s = dbcontext.get_settings(&guild).await.expect("hmm").blacklist.clone();
+
+    let mut removed = String::new();
+    match &*which_list {
+        "name" => {
+            if s.simplename.is_empty() {
+                msg.channel_id.say(&ctx.http, "There aren't any entries in the simple name list, so removing one doesn't make sense").await;
+                return Ok(());
+            } else if index > s.simplename.len() {
+                msg.channel_id.say(&ctx.http, format!("There are only {} entries in the simple name list, so you must specify a number between 1 and that.", s.simplename.len())).await;
+                return Ok(());
+            } else {
+                removed = s.simplename.remove(index-1);
+            }
+        }
+        "regexname" => {
+            if s.regexname.is_empty() {
+                msg.channel_id.say(&ctx.http, "There aren't any entries in the regex name list, so removing one doesn't make sense").await;
+                return Ok(());
+            } else if index > s.regexname.len() {
+                msg.channel_id.say(&ctx.http, format!("There are only {} entries in the regex name list, so you must specify a number between 1 and that.", s.regexname.len())).await;
+                return Ok(());
+            } else {
+                removed = s.regexname.remove(index-1);
+            }
+        }
+        "avatar" => {
+            if s.avatar.is_empty() {
+                msg.channel_id.say(&ctx.http, "There aren't any entries in the avatar list, so removing one doesn't make sense").await;
+                return Ok(());
+            } else if index > s.avatar.len() {
+                msg.channel_id.say(&ctx.http, format!("There are only {} entries in the avatar list, so you must specify a number between 1 and that.", s.avatar.len())).await;
+                return Ok(());
+            } else {
+                removed = s.avatar.remove(index-1);
+            }
+        }
+        _ => {
+            println!("noetuhsotnhausnohtusn");
+            msg.channel_id.say(&ctx.http, "That option was not recognized. Acceptable inputs are `name` `regexname` `avatar`").await;
+            return Ok(());
+        }
+    };
+    if dbcontext.save_blacklist(&guild, s).await {
+        msg.channel_id.say(&ctx.http, format!("Successfully removed `{}`", removed)).await;
+    } else {
+        msg.channel_id.say(&ctx.http, "Problems occurred while updating db :_(\n if they persist, tell the dev or try `db-settings reset`").await;
+    };
+    Ok(())
+}
+
+#[command]
 #[required_permissions("ADMINISTRATOR")]
+async fn bl(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let mut data = ctx.data.write().await;
+    let mut dbcontext = data
+        .get_mut::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+    let guild: u64 = match msg.guild_id {
+        Some(id) => id.0,
+        None => 0,
+    };
+    let mut s = dbcontext.get_settings(&guild).await.expect("hmm").blacklist.clone();
+    s.avatar.push(String::from("the last airbender"));
+
+
+
+    if dbcontext.save_blacklist(&guild, s).await {
+        msg.channel_id
+            .say(&ctx.http, "Successfully did the thing")
+            .await?;
+    } else {
+        let s = "Problems were encountered while attempting to do stuff";
+        msg.channel_id.say(&ctx.http, s).await?;
+    }
+    Ok(())
+}
+
+
+#[command]
+#[required_permissions("ADMINISTRATOR")]
+async fn reset(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    let mut data = ctx.data.write().await;
+    let mut dbcontext = data
+        .get_mut::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+    let guild: u64 = match msg.guild_id {
+        Some(id) => id.0,
+        None => 0,
+    };
+
+    if dbcontext.add_guild(&guild).await {
+        msg.channel_id
+            .say(&ctx.http, "Successfully reset all settings")
+            .await?;
+    } else {
+        let s = "Problems were encountered while attempting to reset all settings";
+        msg.channel_id.say(&ctx.http, s).await?;
+    }
+    Ok(())
+}
+
+#[command]
+#[required_permissions("BAN_MEMBERS")]
 async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let mut successes: u8 = 0;
     let mut fails: u8 = 0;
@@ -172,10 +376,10 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
     let guild_id = msg.guild_id.expect("infallible").0;
 
-    let mut dbcontext = data
-        .get_mut::<MyDbContext>()
+    let dbcontext = data
+        .get::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
-    let settings = dbcontext.fetch_settings(&guild_id).await.unwrap();
+    let settings = dbcontext.get_settings(&guild_id).await.unwrap().clone();
     let mut mom = data
         .get_mut::<Gramma>()
         .expect("Expected your momma in TypeMap.")
@@ -314,7 +518,7 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             };
 
             // Check the mute roll and stuff
-            if let Some(settings) = dbcontext.fetch_settings(&guild_id).await {
+            if let Some(settings) = dbcontext.get_settings(&guild_id).await {
                 if choice == Action::Mute && settings.muteroll == 0 {
                     let mut roll: u64 = 0;
                     if let Some(rol) = get_roll_id_by_name(&ctx, &msg, "muted").await {
@@ -442,29 +646,6 @@ async fn get_roll_from_set_command(ctx: &Context, msg: &Message, choice: &String
 
 #[command]
 #[required_permissions("ADMINISTRATOR")]
-async fn reset(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let mut data = ctx.data.write().await;
-    let mut dbcontext = data
-        .get_mut::<MyDbContext>()
-        .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-
-    if dbcontext.add_guild(&guild).await {
-        msg.channel_id
-            .say(&ctx.http, "Successfully reset all settings")
-            .await?;
-    } else {
-        let s = "Problems were encountered while attempting to reset all settings";
-        msg.channel_id.say(&ctx.http, s).await?;
-    }
-    Ok(())
-}
-
-#[command]
-#[required_permissions("ADMINISTRATOR")]
 async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     // redundant perm check is neccissary cuz lib bypasses the perms when running a group default command
     let g = ctx
@@ -490,7 +671,7 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         None => 0,
     };
 
-    let settings = dbcontext.fetch_settings(&guild).await;
+    let settings = dbcontext.get_settings(&guild).await;
     let settings = settings.unwrap();
 
     // embeds -
@@ -506,6 +687,13 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     **General settings**
     {}.
     Ping spam limits are {}.
+
+    **Blacklists:**
+    New users with these usernames or avatars will be {}
+    username, simple: {} entries
+    username, regex: {} entries
+    avatar: {} entries
+    Run `bb-blacklist` to see them
 
     All underlined items are configurable - run `bb-settings options` for more about that.
     "#,
@@ -549,7 +737,16 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
                 Action::Mute => "muted",
                 Action::Nothing => "this state is not reachable in code",
             }, settings.usermentions, settings.rollmentions, settings.anymentions, settings.mentiontime)
-        }
+        },
+        match settings.blacklistaction {
+            Action::Ban => "banned",
+            Action::Kick => "kicked",
+            Action::Mute => "muted",
+            Action::Nothing => "left alone"
+        },
+        settings.blacklist.simplename.len(),
+        settings.blacklist.regexname.len(),
+        settings.blacklist.avatar.len()
     );
 
     msg.channel_id.say(&ctx.http, s).await?;

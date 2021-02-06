@@ -1,10 +1,12 @@
 use serenity::model::application::MembershipState::Accepted;
-use sqlx;
 use sqlx::database::HasValueRef;
 use sqlx::{query_as_with, sqlx_macros, Database, Decode, Encode, Result, Sqlite};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::error::Error;
+use serde::Serialize;
+use serde::Deserialize;
+use crate::blob_blacklist_conversions::{decode, encode};
 
 /// What to do to noobs when shit hits the fan (autopanic on)
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -39,15 +41,49 @@ impl From<i64> for Action {
 }
 
 /// todo: store this in the db later
-#[derive(sqlx::FromRow, sqlx::Encode, sqlx::Decode)]
+#[derive(Debug, Clone, sqlx::FromRow, sqlx::Encode, sqlx::Decode, sqlx::Type, serde::Deserialize, serde::Serialize)]
 pub struct Blacklist {
-    pub simplename: Box<Vec<Box<str>>>,
-    pub regexname: Box<Vec<Box<str>>>,
-    pub avatar: Box<Vec<Box<str>>>,
+    pub simplename: Vec<String>,
+    pub regexname: Vec<String>,
+    pub avatar: Vec<String>,
 }
 
+impl Blacklist {
+    fn new() -> Self{
+        Blacklist {
+            simplename: vec![],
+            regexname: vec![],
+            avatar: vec![],
+        }
+    }
+    fn from_bytes(raw: Vec<u8>) -> Self {
+        let mut stuffs = decode(raw);
+        //println!("from_bytes-> {:#?}", stuffs);
+        assert!(stuffs.len() >= 3);
+        // maybe using serde instead of custom serialization would eliminate the need for these hacks
+        if stuffs[0][0].is_empty() {
+            stuffs[0].remove(0);
+        }
+        if stuffs[1][0].is_empty() {
+            stuffs[1].remove(0);
+        }
+        if stuffs[2][0].is_empty() {
+            stuffs[2].remove(0);
+        }
+        Blacklist {
+            simplename: stuffs[0].clone(),
+            regexname: stuffs[1].clone(),
+            avatar: stuffs[2].clone(),
+        }
+    }
+    fn to_bytes(&self) -> Vec<u8> {
+        encode(vec![&self.simplename, &self.regexname, &self.avatar])
+    }
+}
+
+
 /// Per-guild settings (aka a full row in the sql table, but with dif types)
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug,  Clone)]
 pub struct Settings {
     pub guild: u64,
     pub enabled: bool,
@@ -62,6 +98,8 @@ pub struct Settings {
     pub mentionaction: Action,
     pub mentiontime: u32,
     pub notify: u64, // who to ping in logs when stuff goes down
+    pub blacklist: Blacklist,
+    pub blacklistaction: Action,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -79,29 +117,28 @@ struct RawSettings {
     mentionaction: i64,
     mentiontime: i32,
     notify: u64,
+    blacklist: Vec<u8>,
+    blacklistaction: i64
 }
 
 impl From<RawSettings> for Settings {
     fn from(s: RawSettings) -> Self {
         Settings {
-            guild: s.guild.try_into().unwrap(),
-            enabled: {
-                match s.enabled {
-                    0 => false,
-                    _ => true,
-                }
-            },
+            guild: s.guild,
+            enabled: s.enabled != 0,
             action: s.action.try_into().unwrap(),
             users: s.users.try_into().unwrap(),
             time: s.time.try_into().unwrap(),
-            logs: s.logs.try_into().unwrap(),
-            muteroll: s.muteroll.try_into().unwrap(),
+            logs: s.logs,
+            muteroll: s.muteroll,
             rollmentions: s.rollmentions.try_into().unwrap(),
             usermentions: s.usermentions.try_into().unwrap(),
             anymentions: s.anymentions.try_into().unwrap(),
             mentionaction: s.mentionaction.try_into().unwrap(),
             mentiontime: s.mentiontime.try_into().unwrap(),
-            notify: s.notify.try_into().unwrap(),
+            notify: s.notify,
+            blacklist: Blacklist::from_bytes(s.blacklist),
+            blacklistaction: s.blacklistaction.try_into().unwrap()
         }
     }
 }
@@ -114,10 +151,10 @@ pub struct MyDbContext {
 
 impl MyDbContext {
     pub fn new(pool: sqlx::SqlitePool) -> Self {
-        return MyDbContext {
+        MyDbContext {
             pool,
             cache: HashMap::new(),
-        };
+        }
     }
 
     pub async fn add_guild_table(&self) -> bool {
@@ -135,7 +172,9 @@ impl MyDbContext {
                 anymentions INTEGER DEFAULT 8,
                 mentionaction INTEGER DEFAULT 3,
                 mentiontime INTEGER DEFAULT 5,
-                notify INTEGER DEFAULT 0
+                notify INTEGER DEFAULT 0,
+                blacklist BLOB DEFAULT NULL,
+                blacklistaction INTEGER DEFAULT 1
                 );
             ";
         match sqlx::query(q).execute(&self.pool).await {
@@ -149,22 +188,19 @@ impl MyDbContext {
 
     pub async fn add_guild(&mut self, guild: &u64) -> bool {
         self.add_guild_table().await;
-        match sqlx::query("DELETE FROM settings WHERE guild=?1;")
+        sqlx::query("DELETE FROM settings WHERE guild=?1;")
             .bind(&guild)
             .execute(&self.pool)
-            .await
-        {
-            Ok(_) => (),
-            Err(_) => (),
-        }
-        match sqlx::query("INSERT INTO settings (guild) VALUES (?1);")
+            .await.is_ok();
+        match sqlx::query("INSERT INTO settings (guild, blacklist) VALUES (?1, ?2);")
             .bind(&guild)
+            .bind(Blacklist::new().to_bytes())
             .execute(&self.pool)
             .await
         {
             Ok(_) => {
                 let settings = self.fetch_settings(&guild).await.unwrap();
-                self.cache.insert(guild.clone(), settings);
+                self.cache.insert(*guild, settings);
                 true
             }
             Err(why) => {
@@ -172,6 +208,10 @@ impl MyDbContext {
                 false
             }
         }
+    }
+
+    pub async fn get_settings(&self, guild_id: &u64) -> Option<&Settings> {
+        self.cache.get(guild_id)
     }
 
     pub async fn fetch_settings(&mut self, guild_id: &u64) -> Option<Settings> {
@@ -194,12 +234,8 @@ impl MyDbContext {
     }
 
     pub async fn set_enabled(&mut self, guild: &u64, enabled: bool) -> bool {
-        let benabled: i32 = match enabled {
-            true => 1,
-            false => 0,
-        };
         match sqlx::query("UPDATE settings SET enabled = ?1 WHERE guild = ?2")
-            .bind(benabled)
+            .bind(enabled as i32)
             .bind(&guild)
             .execute(&self.pool)
             .await
@@ -218,10 +254,29 @@ impl MyDbContext {
         }
     }
 
+    pub async fn save_blacklist(&mut self, guild: &u64, new_bl: Blacklist) -> bool {
+        match sqlx::query("UPDATE settings SET blacklist = ?1 WHERE guild = ?2")
+            .bind(new_bl.to_bytes())
+            .bind(guild)
+            .execute(&self.pool)
+            .await
+        {
+            Ok(_) => {
+                self.cache.get_mut(guild).expect("yeetus").blacklist = new_bl.clone();
+                true
+            },
+            Err(why) => {
+                println!("Saving blacklist failed: {}", why);
+                false
+            }
+
+        }
+    }
+
     pub async fn set_attr(&mut self, guild: &u64, key: &str, value: i64) -> bool {
         // format macro because sql sucks sometimes ig
-        let s = &format!("UPDATE settings SET {} = ?1 WHERE guild = ?2", key)[..];
-        println!("{}", s);
+        let s = &*format!("UPDATE settings SET {} = ?1 WHERE guild = ?2", key);
+        //println!("{}", s);
         match sqlx::query(s)
             .bind(value)
             .bind(guild)
@@ -242,6 +297,7 @@ impl MyDbContext {
                     "mentiontime" => settings.mentiontime = value.try_into().unwrap(),
                     "mentionaction" => settings.mentionaction = value.try_into().unwrap(),
                     "notify" => settings.notify = value.try_into().unwrap(),
+                    "blacklistaction" => settings.blacklistaction = value.try_into().unwrap(),
                     s => {
                         println!(
                             "Broski I couldn't update the cached settings cuz {} wasn't in there",

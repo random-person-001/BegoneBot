@@ -35,6 +35,7 @@ use tokio::sync::Mutex;
 mod autopanic;
 mod commands;
 mod db;
+mod blob_blacklist_conversions;
 
 use crate::autopanic::*;
 use crate::commands::*;
@@ -156,14 +157,19 @@ struct General;
 #[summary = "Adjust settings"]
 // Sets a command that will be executed if only a group-prefix was passed.
 #[default_command(show)]
-#[commands(reset, set, options)]
+#[commands(reset, set, options, bl)]
 struct Settings;
+
+#[group]
+#[prefixes("blacklist", "bl")]
+#[commands(remove, add, blacklist_show)]
+struct Blacklist;
 
 #[help]
 // This replaces the information that a user can pass
 // a command-name as argument to gain specific information about it.
 #[individual_command_tip = "Hello! こんにちは！Hola! Bonjour! 您好! 안녕하세요~\n\n\
-I'm a bot that helps protect servers against raids."]
+I'm a bot that helps protect servers against raids. For now, I am not hosted constantly and only people with admin perms can use my best commands"]
 // Some arguments require a `{}` in order to replace it with contextual information.
 // In this case our `{}` refers to a command's name.
 #[command_not_found_text = "Could not find: `{}`."]
@@ -274,6 +280,7 @@ async fn main() {
         // #name is turned all uppercase
         .help(&MY_HELP)
         .group(&GENERAL_GROUP)
+        .group(&BLACKLIST_GROUP)
         .group(&SETTINGS_GROUP);
 
     let mut client = Client::builder(&token)

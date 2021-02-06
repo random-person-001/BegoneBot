@@ -92,18 +92,18 @@ pub async fn check_against_pings(ctx: &Context, mom: &mut YourMama, guild: u64) 
 pub async fn check_against_joins(ctx: &Context, guild: u64) {
     println!("I am totally checking for people joining too much here");
     let mut data = ctx.data.write().await;
-    let mut dbcontext = data
-        .get_mut::<MyDbContext>()
+    let dbcontext = data
+        .get::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
-    let settings = dbcontext.fetch_settings(&guild).await.unwrap();
+    let settings = dbcontext.get_settings(&guild).await.unwrap().clone();
+    let max_users = settings.users as u64;
+    let max_time = settings.time;
 
     let mut grammy = data
         .get_mut::<Gramma>()
         .expect("Expected your momma in TypeMap.");
     let mut mom = grammy.get(&guild);
 
-    let max_users = settings.users as u64;
-    let max_time = settings.time;
     let now = time_now();
     let mut n = 0u64;
     let mut latest_joiner_ts = 0u64;
@@ -183,7 +183,6 @@ pub async fn check_against_joins(ctx: &Context, guild: u64) {
             }
             _ => (),
         };
-    } else {
     }
 }
 
