@@ -143,7 +143,7 @@ async fn set_status(ctx: &Context) {
 
 #[group]
 #[summary = "Good commands to have around"]
-#[commands(panic, uinfo, forceban)]
+#[commands(panic, uinfo, forceban, hel)]
 struct General;
 
 #[group]
@@ -163,7 +163,7 @@ struct Meta;
 #[summary = "Adjust settings. Run bb-settings so see them"]
 // Sets a command that will be executed if only a group-prefix was passed.
 #[default_command(show)]
-#[commands(reset, set, options)]
+#[commands(reset, set)]
 struct Settings;
 
 #[group]

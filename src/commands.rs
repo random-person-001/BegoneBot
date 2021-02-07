@@ -11,6 +11,8 @@ use serenity::{
 };
 use std::convert::TryInto;
 use std::process::exit;
+use serenity::model::channel::Embed;
+use serenity::builder::CreateMessage;
 
 #[command]
 async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
@@ -407,9 +409,7 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     Ok(())
 }
 
-#[command]
-#[required_permissions("ADMINISTRATOR")]
-async fn options(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
+async fn options(ctx: &Context, msg: &Message) -> CommandResult {
     let s = "    _Example:_ To set the raid panic to trigger when 3 people join in 4 seconds, send these two messages:
 `bb-settings set users 3`
 `bb-settings set time 4`
@@ -439,15 +439,40 @@ The following are the settings you can adjust:";
 }
 
 #[command]
+async fn hel(ctx: &Context, msg: &Message, _: Args) -> CommandResult{
+    msg.channel_id.send_message(&ctx.http, |m| {
+            m.embed(|e| {
+                e.title("BegoneBot Help");
+                e.color(0xc72a69);
+                e.description(" \
+                I'm a small but powerful bot that helps protect servers against raids.  \
+                ");
+                e.field("panic", "Go into panic mode to counter a raid. To turn off, run _bb-panic off_", false);
+                e.field("settings", "View the current configuration settings. Pretty useful!", true);
+                e.field("settings set", "See what settings you can adjust, or adjust them", true);
+                e.field("settings reset", "Reset every setting to defaults", true);
+                e.field("forceban", "Ban multiple users by their ids, separated by spaces. Banning users who aren't here works too", false);
+                e.field("blacklist", "Show the blacklists that apply to new members joining, and how to add to them", true);
+                e.field("blacklist add", "Add an entry to the blacklist", true);
+                e.field("blacklist remove", "Remove an entry from the blacklist by index", true);
+                e.field("uinfo", "View profile pic and creation date of any account, not necessarily a member here, by id.", false);
+                e.field("about", "Learn a little more about me", false);
+                e.footer(|f| {
+                    f.text("my prefix is bb-");
+                    f.icon_url("https://cdn.discordapp.com/avatars/802019556801511424/b8a65c225df2567ddb95cf5158fdeab8.webp?size=128");
+                    f
+                });
+                e
+            })}).await;
+    Ok(())
+}
+
+#[command]
 #[required_permissions("ADMINISTRATOR")]
 async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     if args.is_empty() {
-        msg.channel_id
-            .say(
-                &ctx.http,
-                "I need some arguments. Run `bb-settings options` to see usage",
-            )
-            .await;
+        options(&ctx, &msg).await;
+        return Ok(())
     }
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
@@ -459,7 +484,7 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     if args.is_empty() {
         msg.channel_id.say(
             &ctx.http,
-            "I need a value to set that to. Run `bb-settings options` for more",
+            "I need a value to set that to. Run `bb-settings set` for more",
         );
         return Ok(());
     }
@@ -601,7 +626,7 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             choice as i64
         }
         _ => {
-            msg.channel_id.say(&ctx.http, "I didn't recognize that setting you tried to change. Run `bb-settings options` to see usage").await;
+            msg.channel_id.say(&ctx.http, "I didn't recognize that setting you tried to change. Run `bb-settings set` to see usage").await;
             return Ok(());
         }
     };
@@ -684,7 +709,7 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     avatar: __{} entries__
     Run `bb-blacklist` to see them and learn how to change them.
 
-    All underlined items are configurable - run `bb-settings options` for more about that.
+    All underlined items are configurable - run `bb-settings set` for more about that.
     "#,
         if settings.enabled {
             "**DISABLED!**"
