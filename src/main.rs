@@ -80,7 +80,7 @@ impl EventHandler for Handler {
         set_status(&ctx).await;
     }
 
-    async fn guild_member_addition(&self, ctx: Context, guild_id: GuildId, new_member: Member) {
+    async fn guild_member_addition(&self, ctx: Context, guild_id: GuildId, new_member: mut Member) {
         println!("new member joined: {}", new_member.user.name);
         {
             let mut data = ctx.data.write().await;
@@ -99,6 +99,7 @@ impl EventHandler for Handler {
             );
         }
         check_against_joins(&ctx, guild_id.0).await;
+        check_against_blacklist(&ctx, new_member, guild_id.0).await;
     }
 
     async fn message(&self, ctx: Context, new_message: Message) {

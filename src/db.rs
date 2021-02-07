@@ -7,6 +7,7 @@ use std::error::Error;
 use serde::Serialize;
 use serde::Deserialize;
 use crate::blob_blacklist_conversions::{decode, encode};
+use regex::Regex;
 
 /// What to do to noobs when shit hits the fan (autopanic on)
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -41,11 +42,12 @@ impl From<i64> for Action {
 }
 
 /// todo: store this in the db later
-#[derive(Debug, Clone, sqlx::FromRow, sqlx::Encode, sqlx::Decode, sqlx::Type, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, sqlx::FromRow, sqlx::Encode, sqlx::Decode, sqlx::Type)]
 pub struct Blacklist {
     pub simplename: Vec<String>,
     pub regexname: Vec<String>,
     pub avatar: Vec<String>,
+    compiled_regexname: Vec<Regex>
 }
 
 impl Blacklist {
@@ -54,6 +56,7 @@ impl Blacklist {
             simplename: vec![],
             regexname: vec![],
             avatar: vec![],
+            compiled_regexname: vec![]
         }
     }
     fn from_bytes(raw: Vec<u8>) -> Self {
@@ -74,10 +77,20 @@ impl Blacklist {
             simplename: stuffs[0].clone(),
             regexname: stuffs[1].clone(),
             avatar: stuffs[2].clone(),
+            compiled_regexname: stuffs[1].iter().map(|s| Regex::new(s).expect("An invalid regex was attempted to be loaded")).collect()
         }
     }
     fn to_bytes(&self) -> Vec<u8> {
         encode(vec![&self.simplename, &self.regexname, &self.avatar])
+    }
+
+    pub fn regex_name_matches(&self, subject: &str) -> bool {
+        for i in &self.compiled_regexname {
+            if i.is_match(subject) {
+                return true;
+            }
+        }
+        false
     }
 }
 

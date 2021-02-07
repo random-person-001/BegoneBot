@@ -89,6 +89,41 @@ pub async fn check_against_pings(ctx: &Context, mom: &mut YourMama, guild: u64) 
     println!("I am totally checking for people pinging too much here");
 }
 
+pub async fn check_against_blacklist(ctx: &Context, mut member: serenity::model::guild::Member, guild: u64) {
+    println!("I am totally checking against the blacklist here");
+    let mut data = ctx.data.write().await;
+    let dbcontext = data
+        .get::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+    let settings = dbcontext.get_settings(&guild).await.unwrap();
+    if settings.blacklist.regex_name_matches(&member.user.name) || settings.blacklist.simplename.contains(&member.user.name) {
+        match ChannelId(settings.logs)
+            .say(&ctx.http, "Panic mode has been deactivated")
+            .await
+        {
+            Ok(_) => (),
+            Err(why) => println!("error printing stuff: {}", why),
+        };
+        match settings.blacklistaction {  // todo: more handling of a non ideal world scenario here
+            Action::Ban => {
+                GuildId(guild).ban_with_reason(&ctx.http, member, 0, "Username matched the blacklist").await;
+                ChannelId(settings.logs).say(&ctx.http, "Banned {} because their name matches the blacklist").await;
+            }
+            Action::Kick => {
+                GuildId(guild).kick_with_reason(&ctx.http, member, "Username matched the blacklist").await;
+                ChannelId(settings.logs).say(&ctx.http, "Kicked {} because their name matches the blacklist").await;
+            }
+            Action::Mute => {
+                member.add_role(ctx, settings.muteroll).await;
+                ChannelId(settings.logs).say(&ctx.http, "Muted {} because their name matches the blacklist").await;
+            }
+            _ => ()
+        };
+    }
+
+
+}
+
 pub async fn check_against_joins(ctx: &Context, guild: u64) {
     println!("I am totally checking for people joining too much here");
     let mut data = ctx.data.write().await;
