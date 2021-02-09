@@ -40,97 +40,75 @@ Next steps:
   transient states
    - add event driven checks of status and purging cache
    - better help
-   - better settings changing
 
-  - set status to D&D
-
-? / help      display help
-.on/off        enable/disable auto panic
-.current       display current settings
-.users <#>     User joins needed to trigger AP
-.time <#>      time window to trigger AP
-.action        choose whether to ban, kick, or mute upon AP
-.now           turns on panic mode immediately
-.stop          turns off panic mode immediately
-.muteroll @r   sets @r to be the roll applied automatically to noobs during panic when action=mute
-.logs #chan    sets #chan to be where logs occur
-
-.- Dm auto kicked/banned people with message like "we currently do not allow new people in the server because we are being raided, try again later", or something like that.
-
-.ability to get detailed and specific userinfo even if person isn't in the server (like avatar, username)
-
-
-.roll/user/any mention spam limit
-
-blacklist     automatically apply `action` to any new join at any time if they have a bad -
- name simple  username
- name regex   username
- avatar       pfp
- message      message content
 
 
 
 some time after raid stops, turn panic mode off
 
- */
 
-/*
-fn on_user_join(&state, &user) {
-    // check if autopanic is on
-        // check if it should be turned off
-        // else
-            // punish the user
-
-    // check if it should be turned on
-        // punish the user
-}*/
+*/
 
 pub async fn check_against_pings(ctx: &Context, mom: &mut YourMama, guild: u64) {
     println!("I am totally checking for people pinging too much here");
 }
 
-pub async fn check_against_blacklist(ctx: &Context, mut member: serenity::model::guild::Member, guild: u64) {
+pub async fn check_against_blacklist(
+    ctx: &Context,
+    mut member: serenity::model::guild::Member,
+    guild: u64,
+) {
     println!("I am totally checking against the blacklist here");
     let mut data = ctx.data.write().await;
     let dbcontext = data
         .get::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     let settings = dbcontext.get_settings(&guild).await.unwrap();
-    if settings.blacklist.regex_name_matches(&member.user.name) || settings.blacklist.simplename.contains(&member.user.name) {
-        /*
-        match ChannelId(settings.logs)
-            .say(&ctx.http, "Panic mode has been deactivated")
-            .await
-        {
-            Ok(_) => (),
-            Err(why) => println!("error printing stuff: {}", why),
-        };*/
+    if settings.blacklist.regex_name_matches(&member.user.name)
+        || settings.blacklist.simplename.contains(&member.user.name)
+        || (member.user.avatar.is_some()
+            && settings
+                .blacklist
+                .avatar
+                .contains(&member.user.avatar.as_ref().unwrap()))
+    {
         let outcome = match settings.blacklistaction {
             Action::Ban => {
-                match GuildId(guild).ban_with_reason(&ctx.http, &member, 0, "Username matched the blacklist").await {
-                    Ok(_) => ChannelId(settings.logs).say(&ctx.http, format!("Banned {}#{} because their name matches the blacklist", &member.user.name, &member.user.discriminator)).await,
-                    Err(_) => ChannelId(settings.logs).say(&ctx.http, format!("Tried and failed to ban {}#{} because their name matches the blacklist. Please grant me ban permissions so I can do my job better", &member.user.name, &member.user.discriminator)).await,
-                }
+                let _ = member.user.direct_message(&ctx.http, |f| f.content("Hey bud. You tried to join a server but they don't like your name or pfp so you got banned.")).await;
+                let res = GuildId(guild)
+                    .ban_with_reason(&ctx.http, &member, 0, "Username matched the blacklist")
+                    .await;
+                ("Banned", "ban", res)
             }
             Action::Kick => {
-                match GuildId(guild).kick_with_reason(&ctx.http, &member, "Username matched the blacklist").await {
-                    Ok(_) => ChannelId(settings.logs).say(&ctx.http, format!("Kicked {}#{} because their name matches the blacklist", &member.user.name, &member.user.discriminator)).await,
-                    Err(_) => ChannelId(settings.logs).say(&ctx.http, format!("Tried and failed to kick {}#{} because their name matches the blacklist. Please grant me kick permissions so I can do my job better", &member.user.name, &member.user.discriminator)).await,
-                }
+                let _ = member.user.direct_message(&ctx.http, |f| f.content("Hey bud. You tried to join a server but they don't like your name or pfp so you got booted.")).await;
+                let res = GuildId(guild)
+                    .kick_with_reason(&ctx.http, &member, "Username matched the blacklist")
+                    .await;
+                ("Kicked", "kick", res)
             }
             Action::Mute => {
-                match member.add_role(ctx, settings.muteroll).await {
-                    Ok(_) => ChannelId(settings.logs).say(&ctx.http, format!("Muted {}#{} because their name matches the blacklist", &member.user.name, &member.user.discriminator)).await,
-                    Err(_) => ChannelId(settings.logs).say(&ctx.http, format!("Tried and failed to mute {}#{} because their name matches the blacklist. Please grant me manage rolls permissions so I can do my job better", &member.user.name, &member.user.discriminator)).await
-                }
+                let _ = member.user.direct_message(&ctx.http, |f| f.content("Hey bud. You tried to join a server but they don't like your name or pfp so you got muted.")).await;
+                let res = member.add_role(ctx, settings.muteroll).await;
+                ("Muted", "mute", res)
             }
             Action::Nothing => {
-                ChannelId(settings.logs).say(&ctx.http, format!("New member {}#{} matches the blacklist, but settings say for me to do nothing about it.", &member.user.name, &member.user.discriminator)).await
+                ChannelId(settings.logs).say(&ctx.http, format!("New member {}#{} (id {2} - <@{2}>) matches the blacklist, but settings tell me to do nothing about it.", &member.user.name, &member.user.discriminator, member.user.id)).await;
+                return;
             }
         };
-        match outcome {
-            Ok(_) => (),
-            Err(why) => println!("{}", why)  // most likely, no settings channel configured
+        match outcome.2 {
+            Ok(_) => {
+                if settings.logs > 0 {
+                    ChannelId(settings.logs).say(&ctx.http, format!("{} {}#{} (id {3} - <@{3}>) because their name or avatar matches the blacklist", outcome.0, &member.user.name, &member.user.discriminator, member.user.id)).await;
+                }
+            }
+            Err(why) => {
+                if settings.logs > 0 {
+                    ChannelId(settings.logs).say(&ctx.http, format!("Tried and failed to {} {}#{} (id {3} - <@{3}>) because their name or avatar matches the blacklist. Please grant me more permissions so I can do my job better", outcome.1, &member.user.name, &member.user.discriminator, member.user.id)).await;
+                }
+                println!("{}", why)
+            }
         };
     }
 }

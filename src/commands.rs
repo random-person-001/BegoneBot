@@ -1,6 +1,8 @@
 use crate::autopanic;
 use crate::autopanic::Gramma;
 use crate::db::{Action, MyDbContext};
+use serenity::builder::CreateMessage;
+use serenity::model::channel::Embed;
 use serenity::{
     framework::standard::{
         macros::{check, command},
@@ -11,8 +13,6 @@ use serenity::{
 };
 use std::convert::TryInto;
 use std::process::exit;
-use serenity::model::channel::Embed;
-use serenity::builder::CreateMessage;
 
 #[command]
 async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
@@ -47,7 +47,7 @@ async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
 
 #[command]
 #[required_permissions("ADMINISTRATOR")]
-async fn blacklist_show(ctx: &Context, msg: &Message, args:Args) -> CommandResult{
+async fn blacklist_show(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let data = ctx.data.write().await;
     let dbcontext = data
         .get::<MyDbContext>()
@@ -66,6 +66,7 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args:Args) -> CommandResul
                 e.color(0x070707);
                 e.description(" \
                  • To adjust what happens when a member joins who matches a blacklist item, use `bb-settings set blacklistaction` with `ban`, `kick`, `mute`, or `nothing` at the end (default is kick). \n \
+                 • To blacklist anyone who has the same profile picture (avatar) as the user 802019556801511424, run `bb-uinfo 802019556801511424`, copy the avatar hash, and then run `bb-blacklist add avatar [paste it here]` \n \
                  • To blacklist any users who are named EvilBotnet, run `bb-blacklist add name EvilBotnet` \n \
                  • To blacklist anyone named like DMSpammer4 or DMSpammer87, run `bb-blacklist add regexname DMSpammer\\d+` \
                 Regex is extremely powerful, and there are many references on the web to help you, like [this](https://regex101.com/). \
@@ -81,8 +82,8 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args:Args) -> CommandResul
                 e.field("Regex name blacklist",
                 format!("(will match username by regex)\n`{:?}`", s.regexname),
                 false);
-                e.field("Avatar blacklist",
-                format!("(will match avatar)\n`{:?}`", s.avatar),
+                e.field("Avatar hash blacklist",
+                format!("(will match avatar hash, as given by `bb-uinfo [some id]`)\n`{:?}`", s.avatar),
                 false);
                 e
             });
@@ -94,7 +95,7 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args:Args) -> CommandResul
 
 #[command]
 #[required_permissions("ADMINISTRATOR")]
-async fn add(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
+async fn add(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
@@ -103,8 +104,12 @@ async fn add(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
         Some(id) => id.0,
         None => 0,
     };
-    let mut s = dbcontext.get_settings(&guild).await.expect("hmm").blacklist.clone();
-
+    let mut s = dbcontext
+        .get_settings(&guild)
+        .await
+        .expect("hmm")
+        .blacklist
+        .clone();
 
     if args.len() != 2 {
         println!("{:?}", args);
@@ -112,8 +117,8 @@ async fn add(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
         return Ok(());
     }
 
-    let which_list  = args.single::<String>().unwrap();
-    let new_item  = args.single::<String>().unwrap();
+    let which_list = args.single::<String>().unwrap();
+    let new_item = args.single::<String>().unwrap();
 
     match &*which_list {
         "name" => s.simplename.push(new_item),
@@ -121,13 +126,15 @@ async fn add(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
         "avatar" => s.avatar.push(new_item),
         _ => {
             msg.channel_id.say(&ctx.http, "Broski....... please specify the blacklist you're trying to add to here. It can be one of `name` `regexname` `avatar`").await;
-            return Ok(())
+            return Ok(());
         }
     };
     if dbcontext.save_blacklist(&guild, s).await {
         msg.channel_id.say(&ctx.http, ":+1: Added").await;
     } else {
-        msg.channel_id.say(&ctx.http, "There was a problem saving that setting").await;
+        msg.channel_id
+            .say(&ctx.http, "There was a problem saving that setting")
+            .await;
     }
     Ok(())
 }
@@ -135,7 +142,7 @@ async fn add(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
 #[command]
 #[required_permissions("ADMINISTRATOR")]
 /// usage: bb-blacklist remove nameregex 4 to run settings.blacklist[3].pop()
-async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
+async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
@@ -151,9 +158,7 @@ async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
         return Ok(());
     }
 
-
-    let which_list:String = args.single::<String>().unwrap();
-
+    let which_list: String = args.single::<String>().unwrap();
 
     let index = match args.single::<usize>() {
         Ok(i) => i,
@@ -162,7 +167,12 @@ async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
             return Ok(());
         }
     };
-    let mut s = dbcontext.get_settings(&guild).await.expect("hmm").blacklist.clone();
+    let mut s = dbcontext
+        .get_settings(&guild)
+        .await
+        .expect("hmm")
+        .blacklist
+        .clone();
 
     let mut removed = String::new();
     match &*which_list {
@@ -174,7 +184,7 @@ async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
                 msg.channel_id.say(&ctx.http, format!("There are only {} entries in the simple name list, so you must specify a number between 1 and that.", s.simplename.len())).await;
                 return Ok(());
             } else {
-                removed = s.simplename.remove(index-1);
+                removed = s.simplename.remove(index - 1);
             }
         }
         "regexname" => {
@@ -185,7 +195,7 @@ async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
                 msg.channel_id.say(&ctx.http, format!("There are only {} entries in the regex name list, so you must specify a number between 1 and that.", s.regexname.len())).await;
                 return Ok(());
             } else {
-                removed = s.regexname.remove(index-1);
+                removed = s.regexname.remove(index - 1);
             }
         }
         "avatar" => {
@@ -196,7 +206,7 @@ async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
                 msg.channel_id.say(&ctx.http, format!("There are only {} entries in the avatar list, so you must specify a number between 1 and that.", s.avatar.len())).await;
                 return Ok(());
             } else {
-                removed = s.avatar.remove(index-1);
+                removed = s.avatar.remove(index - 1);
             }
         }
         _ => {
@@ -205,7 +215,9 @@ async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
         }
     };
     if dbcontext.save_blacklist(&guild, s).await {
-        msg.channel_id.say(&ctx.http, format!("Successfully removed `{}`", removed)).await;
+        msg.channel_id
+            .say(&ctx.http, format!("Successfully removed `{}`", removed))
+            .await;
     } else {
         msg.channel_id.say(&ctx.http, "Problems occurred while updating db :_(\n if they persist, tell the dev or try `db-settings reset`").await;
     };
@@ -325,7 +337,12 @@ async fn uinfo(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                             account_creation,
                             age
                         ));
-                        e.thumbnail(u.face());
+                        e.thumbnail(&u.face());
+                        e.field(
+                            "Avatar Hash",
+                            &u.avatar.unwrap_or_else(|| String::from("None")),
+                            true,
+                        );
                         e.footer(|f| {
                             f.text(format!("User id = {}", user_id.0));
                             f
@@ -440,7 +457,7 @@ The following are the settings you can adjust:";
 }
 
 #[command]
-async fn hel(ctx: &Context, msg: &Message, _: Args) -> CommandResult{
+async fn hel(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
     msg.channel_id.send_message(&ctx.http, |m| {
             m.embed(|e| {
                 e.title("BegoneBot Help");
@@ -473,7 +490,7 @@ async fn hel(ctx: &Context, msg: &Message, _: Args) -> CommandResult{
 async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     if args.is_empty() {
         options(&ctx, &msg).await;
-        return Ok(())
+        return Ok(());
     }
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
@@ -757,7 +774,7 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
             Action::Ban => "banned",
             Action::Kick => "kicked",
             Action::Mute => "muted",
-            Action::Nothing => "left alone"
+            Action::Nothing => "left alone",
         },
         settings.blacklist.simplename.len(),
         settings.blacklist.regexname.len(),

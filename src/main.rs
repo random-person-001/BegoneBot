@@ -33,9 +33,9 @@ use std::{
 use serenity::prelude::*;
 use tokio::sync::Mutex;
 mod autopanic;
+mod blob_blacklist_conversions;
 mod commands;
 mod db;
-mod blob_blacklist_conversions;
 
 use crate::autopanic::*;
 use crate::commands::*;

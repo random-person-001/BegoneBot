@@ -1,13 +1,13 @@
+use crate::blob_blacklist_conversions::{decode, encode};
+use regex::Regex;
+use serde::Deserialize;
+use serde::Serialize;
 use serenity::model::application::MembershipState::Accepted;
 use sqlx::database::HasValueRef;
 use sqlx::{query_as_with, sqlx_macros, Database, Decode, Encode, Result, Sqlite};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::error::Error;
-use serde::Serialize;
-use serde::Deserialize;
-use crate::blob_blacklist_conversions::{decode, encode};
-use regex::Regex;
 
 /// What to do to noobs when shit hits the fan (autopanic on)
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -47,16 +47,16 @@ pub struct Blacklist {
     pub simplename: Vec<String>,
     pub regexname: Vec<String>,
     pub avatar: Vec<String>,
-    compiled_regexname: Vec<Regex>
+    compiled_regexname: Vec<Regex>,
 }
 
 impl Blacklist {
-    fn new() -> Self{
+    fn new() -> Self {
         Blacklist {
             simplename: vec![],
             regexname: vec![],
             avatar: vec![],
-            compiled_regexname: vec![]
+            compiled_regexname: vec![],
         }
     }
     fn from_bytes(raw: Vec<u8>) -> Self {
@@ -77,11 +77,18 @@ impl Blacklist {
             simplename: stuffs[0].clone(),
             regexname: stuffs[1].clone(),
             avatar: stuffs[2].clone(),
-            compiled_regexname: stuffs[1].iter().map(|s| Regex::new(s).expect("An invalid regex was attempted to be loaded")).collect()
+            compiled_regexname: stuffs[1]
+                .iter()
+                .map(|s| Regex::new(s).expect("An invalid regex was attempted to be loaded"))
+                .collect(),
         }
     }
     fn recompile_regex(&mut self) -> &mut Self {
-        self.compiled_regexname = self.regexname.iter().map(|s| Regex::new(s).expect("An invalid regex was attempted to be loaded")).collect();
+        self.compiled_regexname = self
+            .regexname
+            .iter()
+            .map(|s| Regex::new(s).expect("An invalid regex was attempted to be loaded"))
+            .collect();
         self
     }
 
@@ -99,9 +106,8 @@ impl Blacklist {
     }
 }
 
-
 /// Per-guild settings (aka a full row in the sql table, but with dif types)
-#[derive(Debug,  Clone)]
+#[derive(Debug, Clone)]
 pub struct Settings {
     pub guild: u64,
     pub enabled: bool,
@@ -136,7 +142,7 @@ struct RawSettings {
     mentiontime: i32,
     notify: u64,
     blacklist: Vec<u8>,
-    blacklistaction: i64
+    blacklistaction: i64,
 }
 
 impl From<RawSettings> for Settings {
@@ -156,7 +162,7 @@ impl From<RawSettings> for Settings {
             mentiontime: s.mentiontime.try_into().unwrap(),
             notify: s.notify,
             blacklist: Blacklist::from_bytes(s.blacklist),
-            blacklistaction: s.blacklistaction.try_into().unwrap()
+            blacklistaction: s.blacklistaction.try_into().unwrap(),
         }
     }
 }
@@ -209,7 +215,8 @@ impl MyDbContext {
         sqlx::query("DELETE FROM settings WHERE guild=?1;")
             .bind(&guild)
             .execute(&self.pool)
-            .await.is_ok();
+            .await
+            .is_ok();
         match sqlx::query("INSERT INTO settings (guild, blacklist) VALUES (?1, ?2);")
             .bind(&guild)
             .bind(Blacklist::new().to_bytes())
@@ -283,12 +290,11 @@ impl MyDbContext {
                 new_bl.recompile_regex();
                 self.cache.get_mut(guild).expect("yeetus").blacklist = new_bl;
                 true
-            },
+            }
             Err(why) => {
                 println!("Saving blacklist failed: {}", why);
                 false
             }
-
         }
     }
 
