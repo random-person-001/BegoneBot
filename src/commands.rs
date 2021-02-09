@@ -68,7 +68,7 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args:Args) -> CommandResul
                  • To adjust what happens when a member joins who matches a blacklist item, use `bb-settings set blacklistaction` with `ban`, `kick`, `mute`, or `nothing` at the end (default is kick). \n \
                  • To blacklist any users who are named EvilBotnet, run `bb-blacklist add name EvilBotnet` \n \
                  • To blacklist anyone named like DMSpammer4 or DMSpammer87, run `bb-blacklist add regexname DMSpammer\\d+` \
-                Regex is extremely powerful, and there are many references on the web to help you. \
+                Regex is extremely powerful, and there are many references on the web to help you, like [this](https://regex101.com/). \
                 \n
                  • If you'd like to remove an item, `bb-blacklist remove` will be your friend. \n\
                  • If you'd like to remove the first entry of the regex name blacklist, run `bb-blacklist remove regexname 1` \
@@ -147,7 +147,7 @@ async fn remove(ctx: &Context, msg: &Message, mut args:Args) -> CommandResult{
 
     if args.len() != 2 {
         println!("{:?}", args);
-        msg.channel_id.say(&ctx.http, "I need exactly two things specified after this: which list you're removing from, and the index of the item you want to remove.").await;
+        msg.channel_id.say(&ctx.http, "I need exactly two things specified after this: which list you're removing from (`avatar`, `name`, or `regexname`), and the index of the item you want to remove.").await;
         return Ok(());
     }
 
@@ -428,6 +428,7 @@ The following are the settings you can adjust:";
             e.field("time", "When `users` join in this amount of seconds, a raid panic is triggered. A number", false);
             e.field("logs", "What channel to post raid notifications. Is none by default. A blue channel name", false);
             e.field("notify", "When a raid panic starts, this roll is pinged in the `logs` channel.  A roll id or mention or written name", false);
+            e.field("muteroll", "If an action is to apply a mute to someone upon joining, this is that mute roll.  A roll id or mention or written name", false);
             e.field("blacklistaction", "When a new member joins who matches the blacklist, this will be done to them. One of `ban` `kick` `mute` `nothing`", false);
             e.footer(|f| {
                 f.text("To check current settings, run just bb-settings")

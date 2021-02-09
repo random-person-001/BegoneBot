@@ -80,6 +80,11 @@ impl Blacklist {
             compiled_regexname: stuffs[1].iter().map(|s| Regex::new(s).expect("An invalid regex was attempted to be loaded")).collect()
         }
     }
+    fn recompile_regex(&mut self) -> &mut Self {
+        self.compiled_regexname = self.regexname.iter().map(|s| Regex::new(s).expect("An invalid regex was attempted to be loaded")).collect();
+        self
+    }
+
     fn to_bytes(&self) -> Vec<u8> {
         encode(vec![&self.simplename, &self.regexname, &self.avatar])
     }
@@ -267,7 +272,7 @@ impl MyDbContext {
         }
     }
 
-    pub async fn save_blacklist(&mut self, guild: &u64, new_bl: Blacklist) -> bool {
+    pub async fn save_blacklist(&mut self, guild: &u64, mut new_bl: Blacklist) -> bool {
         match sqlx::query("UPDATE settings SET blacklist = ?1 WHERE guild = ?2")
             .bind(new_bl.to_bytes())
             .bind(guild)
@@ -275,7 +280,8 @@ impl MyDbContext {
             .await
         {
             Ok(_) => {
-                self.cache.get_mut(guild).expect("yeetus").blacklist = new_bl.clone();
+                new_bl.recompile_regex();
+                self.cache.get_mut(guild).expect("yeetus").blacklist = new_bl;
                 true
             },
             Err(why) => {
