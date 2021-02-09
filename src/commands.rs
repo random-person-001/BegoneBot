@@ -113,7 +113,7 @@ async fn add(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     if args.len() != 2 {
         println!("{:?}", args);
-        msg.channel_id.say(&ctx.http, "I need exactly two things specified after this: which list you're adding to, and the item to add.").await;
+        msg.channel_id.say(&ctx.http, "I need exactly two things specified after this: which list you're adding to (one of `name`, `regexname`, or `avatar`), and the item to add.").await;
         return Ok(());
     }
 
@@ -419,7 +419,6 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         _ => {
             let m = "Broski... I need you to say `on` or `off` after that (if you don't put anything, I'll assume on)";
             msg.channel_id.say(&ctx.http, m).await;
-            ()
         }
     }
 
@@ -659,7 +658,7 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     Ok(())
 }
 
-async fn get_roll_from_set_command(ctx: &Context, msg: &Message, choice: &String) -> Option<i64> {
+async fn get_roll_from_set_command(ctx: &Context, msg: &Message, choice: &str) -> Option<i64> {
     Some(
         (if let Some(rol) = get_roll_id_by_name(&ctx, &msg, &choice[..]).await {
             rol
@@ -679,7 +678,7 @@ async fn get_roll_from_set_command(ctx: &Context, msg: &Message, choice: &String
 #[command]
 #[required_permissions("ADMINISTRATOR")]
 async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
-    // redundant perm check is neccissary cuz lib bypasses the perms when running a group default command
+    // redundant perm check is necessary cuz lib bypasses the perms when running a group default command
     let g = ctx
         .cache
         .guild(msg.guild_id.expect("wtf"))
@@ -836,10 +835,10 @@ fn humanize_duration(mut secs: i64) -> String {
     secs -= s;
     let m = (secs % 3600) / 60;
     secs -= m * 60;
-    let h = (secs % (3600 * 24)) / 3600;
-    secs -= h * (3600);
-    let d = (secs % (3600 * 24 * 365)) / (3600 * 24);
-    secs -= d * (3600 * 24);
-    let y = secs / (3600 * 24 * 365);
-    format!("{}y {}d {}h {}m {}s", y, d, h, m, s)
+    let hour = (secs % (3600 * 24)) / 3600;
+    secs -= hour * (3600);
+    let day = (secs % (3600 * 24 * 365)) / (3600 * 24);
+    secs -= day * (3600 * 24);
+    let year = secs / (3600 * 24 * 365);
+    format!("{}y {}d {}h {}m {}s", year, day, hour, m, s)
 }
