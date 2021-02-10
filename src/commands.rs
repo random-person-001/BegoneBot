@@ -30,12 +30,22 @@ async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
 #[command]
 async fn about(ctx: &Context, msg: &Message) -> CommandResult {
-    let c = format!(
-        "I'm a small antiraid bot in rust written by John Locke#2742 serving {} guilds\n\
-        You can invite me with <https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=18503>",
-        ctx.cache.guild_count().await
-    );
-    msg.channel_id.say(&ctx.http, c).await?;
+    let guild_count = ctx.cache.guild_count().await;
+    msg.channel_id.send_message(&ctx, |m| m.embed(|e| {
+        e.title("About");
+        e.description(format!(
+        "I'm a small antiraid bot in rust written by John Locke#2742 serving {} guilds\n
+        I don't intend to \n\n\
+        instead of writing out settings or blacklist, you can shorten them to s and bl respectively.\
+        ",
+        guild_count));
+        e.field("Links","[Support server](https://discord.gg/eGNDZGdtaR)  |  [invite me](https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=18503)", false);
+        e.footer(|f| {
+            f.text(".");
+            f
+        });
+        e
+    })).await;
     Ok(())
 }
 
@@ -66,10 +76,10 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args: Args) -> CommandResu
                 e.color(0x070707);
                 e.description(" \
                  • To adjust what happens when a member joins who matches a blacklist item, use `bb-settings set blacklistaction` with `ban`, `kick`, `mute`, or `nothing` at the end (default is kick). \n \
-                 • To blacklist anyone who has the same profile picture (avatar) as the user 802019556801511424, run `bb-uinfo 802019556801511424`, copy the avatar hash, and then run `bb-blacklist add avatar [paste it here]` \n \
+                 • To blacklist anyone who has the same profile picture (avatar) as the user 802019556801511424, run `bb-uinfo 802019556801511424` \n \
                  • To blacklist any users who are named EvilBotnet, run `bb-blacklist add name EvilBotnet` \n \
                  • To blacklist anyone named like DMSpammer4 or DMSpammer87, run `bb-blacklist add regexname DMSpammer\\d+` \
-                Regex is extremely powerful, and there are many references on the web to help you, like [this](https://regex101.com/). \
+                Regex is extremely powerful, and there are many resources on the web to help you, like [this](https://regex101.com/). \
                 \n
                  • If you'd like to remove an item, `bb-blacklist remove` will be your friend. \n\
                  • If you'd like to remove the first entry of the regex name blacklist, run `bb-blacklist remove regexname 1` \
@@ -83,7 +93,7 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args: Args) -> CommandResu
                 format!("(will match username by regex)\n`{:?}`", s.regexname),
                 false);
                 e.field("Avatar hash blacklist",
-                format!("(will match avatar hash, as given by `bb-uinfo [some id]`)\n`{:?}`", s.avatar),
+                format!("(will match an avatar's hash, which is unique to a profile picture. Due to technical limitations, from here you can't see the pictures they're referring to, but you could try searching them in chat)\n`{:?}`", s.avatar),
                 false);
                 e
             });
@@ -119,11 +129,34 @@ async fn add(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let which_list = args.single::<String>().unwrap();
     let new_item = args.single::<String>().unwrap();
-
     match &*which_list {
         "name" => s.simplename.push(new_item),
         "regexname" => s.regexname.push(new_item),
-        "avatar" => s.avatar.push(new_item),
+        "avatar" => {
+            let uid: u64 = match new_item.parse() {
+                Ok(s) => s,
+                Err(_) => {
+                    msg.channel_id.say(&ctx.http, "broski i needed a user id there. If you wanna blacklist the avatar that some user 4534 has, run `bb-blacklist add avatar 4534`").await;
+                    return Ok(())
+                }
+            };
+            match UserId(uid).to_user(&ctx).await {
+                Ok(u) => {
+                    if u.avatar.is_some() {
+                        s.avatar.push(u.avatar.clone().unwrap());
+                        msg.channel_id.say(&ctx, format!("The user {0} - {1}#{2} has an avatar hash of {3}\nhttps://cdn.discordapp.com/avatars/{0}/{3}",
+                        u.id, u.name, u.discriminator, u.avatar.unwrap())).await;
+                    } else {
+                        msg.channel_id.say(&ctx, "Bro they have the default avatar so imma say nope to that").await;
+                        return Ok(());
+                    }
+                }
+                Err(_) => {
+                    msg.channel_id.say(&ctx.http, format!("Hey uh so I couldn't find any existing user with the id of {} so I couldn't add their avatar to the blacklist", uid)).await;
+                    return Ok(());
+                }
+            }
+        },
         _ => {
             msg.channel_id.say(&ctx.http, "Broski....... please specify the blacklist you're trying to add to here. It can be one of `name` `regexname` `avatar`").await;
             return Ok(());
@@ -331,6 +364,7 @@ async fn uinfo(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                 .send_message(&ctx.http, |m| {
                     m.embed(|e| {
                         e.title(u.tag());
+                        e.color(0x65ba7a);
                         e.description(format!(
                             "{}\nAccount created on {}\nwhich is {} ago",
                             u.mention(),
@@ -338,11 +372,6 @@ async fn uinfo(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                             age
                         ));
                         e.thumbnail(&u.face());
-                        e.field(
-                            "Avatar Hash",
-                            &u.avatar.unwrap_or_else(|| String::from("None")),
-                            true,
-                        );
                         e.footer(|f| {
                             f.text(format!("User id = {}", user_id.0));
                             f
@@ -387,7 +416,7 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                 "Panic mode has been activated. Turn it off with `bb-panic off`",
             )
             .await;
-        autopanic::start_panicking(&ctx, mom, &settings, guild_id).await;
+        autopanic::start_panicking(&ctx, mom, &settings, guild_id, true).await;
         return Ok(());
     }
 
@@ -397,7 +426,7 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         "on" => {
             println!("Panic mode manually activated for server {}", guild_id);
             mom.panicking = true;
-            autopanic::start_panicking(&ctx, mom, &settings, guild_id).await;
+            autopanic::start_panicking(&ctx, mom, &settings, guild_id, true).await;
             msg.channel_id
                 .say(
                     &ctx.http,
@@ -437,6 +466,7 @@ The following are the settings you can adjust:";
     msg.channel_id.send_message(&ctx.http, |m| {
         m.embed(|e| {
             e.title("Configuring Settings");
+            e.color(0x607277);
             e.description(s);
             e.field("enabled", "whether automatic raid detection and prevention should occur. Input is either `true` or `false`", false);
             e.field("action", "What to do to to new joining members during a raid. One of `ban` `kick` `mute` `nothing`", false);
@@ -446,6 +476,7 @@ The following are the settings you can adjust:";
             e.field("notify", "When a raid panic starts, this roll is pinged in the `logs` channel.  A roll id or mention or written name", false);
             e.field("muteroll", "If an action is to apply a mute to someone upon joining, this is that mute roll.  A roll id or mention or written name", false);
             e.field("blacklistaction", "When a new member joins who matches the blacklist, this will be done to them. One of `ban` `kick` `mute` `nothing`", false);
+            e.field(".", "Adding and removing from blacklists can be done with `bb-blacklist`", false);
             e.footer(|f| {
                 f.text("To check current settings, run just bb-settings")
             });
@@ -538,9 +569,7 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             if let Some(settings) = dbcontext.get_settings(&guild_id).await {
                 if choice == Action::Mute && settings.muteroll == 0 {
                     let mut roll: u64 = 0;
-                    if let Some(rol) = get_roll_id_by_name(&ctx, &msg, "muted").await {
-                        roll = rol;
-                    } else if let Some(rol) = get_roll_id_by_name(&ctx, &msg, "Muted").await {
+                    if let Some(rol) = get_roll_id_by_name_case_insensitive(&ctx, &msg, "muted").await {
                         roll = rol;
                     }
 
@@ -602,7 +631,7 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             let choice = match id_from_mention(&choice[..]) {
                 Some(id) => id,
                 None => {
-                    let s = "Bro that didn't look like a normal channel message :(";
+                    let s = "Bro that didn't look like a normal channel. Make sure it turns blue and clickable";
                     msg.channel_id.say(&ctx.http, s).await?;
                     return Ok(());
                 }
@@ -662,7 +691,7 @@ async fn get_roll_from_set_command(ctx: &Context, msg: &Message, choice: &str) -
     Some(
         (if let Some(rol) = get_roll_id_by_name(&ctx, &msg, &choice[..]).await {
             rol
-        } else if let Some(rol) = get_roll_id_by_name(&ctx, &msg, &choice.to_lowercase()[..]).await
+        } else if let Some(rol) = get_roll_id_by_name_case_insensitive(&ctx, &msg, &choice.to_lowercase()[..]).await
         {
             rol
         } else if let Some(rol) = id_from_mention(&choice[..]) {
@@ -681,7 +710,7 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     // redundant perm check is necessary cuz lib bypasses the perms when running a group default command
     let g = ctx
         .cache
-        .guild(msg.guild_id.expect("wtf"))
+        .guild(msg.guild_id.unwrap())
         .await
         .expect("wtf bro");
     match g.member_permissions(&ctx.http, msg.author.id).await {
@@ -704,54 +733,47 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 
     let settings = dbcontext.get_settings(&guild).await;
     let settings = settings.unwrap();
+    msg.channel_id.send_message(&ctx.http, |m| m.embed(|e| {
+        e.title("Settings");
+        e.color(0x4d8290);
+        e.description("All underlined items are configurable - run `bb-settings set` for more about that.");
+        e.field("Automatic Antiraid", format!(
+            "Automatic raid detection is currently __{}__
+            Panic mode is automatically triggered when __{}__ users join in __{}__ seconds.
+            During panic mode:
+            _ _  - server verification level will be turned to Highest (verified phone required to join)
+            _ _  - any member joining will be {}",
 
-    // embeds -
-    // https://github.com/serenity-rs/serenity/blob/current/examples/e09_create_message_builder/src/main.rs
-    let s = format!(
-        r#"**Automatic antiraid settings**
-    Automatic raid detection is currently __{}__
-    Panic mode is automatically triggered when __{}__ users join in __{}__ seconds.
-    During panic mode:
-      - server verification level will be turned to Highest (verified phone required to join)
-      - any member joining will be {}
-
-    **General settings**
-    {}.
-    Ping spam limits are {}.
-
-    **Blacklists:**
-    Newly joining members with these usernames or avatars will be __{}__
-    username, simple: __{} entries__
-    username, regex: __{} entries__
-    avatar: __{} entries__
-    Run `bb-blacklist` to see them and learn how to change them.
-
-    All underlined items are configurable - run `bb-settings set` for more about that.
-    "#,
-        if settings.enabled {
-            "**DISABLED!**"
-        } else {
-            "ENABLED."
-        },
-        settings.users,
-        settings.time,
-        match settings.action {
-            Action::Ban => String::from("dmed an explanation and __banned__."),
-            Action::Kick => String::from("dmed an explanation and __kicked__."),
-            Action::Mute => {
-                if settings.muteroll == 0 {
-                    String::from("dmed an explanation and __muted.__\n    **PLEASE TELL ME WHAT ROLL TO GIVE PEOPLE TO MUTE THEM** - run `autopanic setmuteroll @theroll`")
-                } else {
-                    format!("__muted__ (given __<@&{}>__)", settings.muteroll)
+            if settings.enabled {
+                "**DISABLED!**"
+            } else {
+                "ENABLED."
+            },
+            settings.users,
+            settings.time,
+            match settings.action {
+                Action::Ban => String::from("dmed an explanation and __banned__."),
+                Action::Kick => String::from("dmed an explanation and __kicked__."),
+                Action::Mute => {
+                    if settings.muteroll == 0 {
+                        String::from("dmed an explanation and __muted.__\n    **PLEASE TELL ME WHAT ROLL TO GIVE PEOPLE TO MUTE THEM** - run `autopanic setmuteroll @theroll`")
+                    } else {
+                        format!("__muted__ (given __<@&{}>__)", settings.muteroll)
+                    }
                 }
-            }
-            Action::Nothing => String::from("__left alone__ by me"),
-        },
+                Action::Nothing => String::from("__left alone__ by me"),
+            },
+        ),
+            false);
+        e.field("General", format!("\
+            {}.\
+            Ping spam limits are {}.",
+
         if let 0 = settings.logs {
             String::from("__No__ logging channel is configured")
         } else {
             format!(
-                "Logs are posted in __<#{}>__ \n    __{}__ is pinged when a raid is detected",
+                "Logs are posted in __<#{}>__ \n    __{}__ is pinged when a raid is detected\n",
                 settings.logs,
                 match settings.notify {
                     0 => String::from("no roll"),
@@ -768,7 +790,16 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
                 Action::Mute => "muted",
                 Action::Nothing => "this state is not reachable in code",
             }, settings.usermentions, settings.rollmentions, settings.anymentions, settings.mentiontime)
-        },
+        }
+        ),
+        false);
+        e.field("Blacklists", format!("
+    Newly joining members with these usernames or avatars will be __{}__
+    _ _  - username, simple: __{} entries__
+    _ _  - username, regex: __{} entries__
+    _ _  - avatar: __{} entries__
+    Run `bb-blacklist` to see them and learn how to change them.
+",
         match settings.blacklistaction {
             Action::Ban => "banned",
             Action::Kick => "kicked",
@@ -778,9 +809,12 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         settings.blacklist.simplename.len(),
         settings.blacklist.regexname.len(),
         settings.blacklist.avatar.len()
-    );
+        ), false);
+        e
+    })).await;
 
-    msg.channel_id.say(&ctx.http, s).await?;
+    // embeds -
+    // https://github.com/serenity-rs/serenity/blob/current/examples/e09_create_message_builder/src/main.rs
     Ok(())
 }
 
@@ -816,10 +850,24 @@ fn id_from_mention(s: &str) -> Option<u64> {
     }
 }
 
+
+/// Find a roll id such that roll.lowercase() == msg (assumed to be lowercase)
+async fn get_roll_id_by_name_case_insensitive(ctx: &Context, msg: &Message, name: &str) -> Option<u64> {
+    if let Some(guild_id) = msg.guild_id {
+        if let Some(guild) = guild_id.to_guild_cached(&ctx).await {
+            if let Some(role) = guild.roles.values().find(|role| name == role.name.clone().to_lowercase()) {
+                println!("yeeeeeeetus");
+                return Some(role.id.0);
+            }
+        }
+    }
+    None
+}
+
+/// Find a roll id from a roll that matches name and case exactly
 async fn get_roll_id_by_name(ctx: &Context, msg: &Message, name: &str) -> Option<u64> {
     if let Some(guild_id) = msg.guild_id {
         if let Some(guild) = guild_id.to_guild_cached(&ctx).await {
-            println!("guild is cached ");
             if let Some(role) = guild.role_by_name(name) {
                 println!("yeeeeeeetus");
                 return Some(role.id.0);

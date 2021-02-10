@@ -64,26 +64,35 @@ pub async fn check_against_blacklist(
         .get::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
     let settings = dbcontext.get_settings(&guild).await.unwrap();
-    if settings.blacklist.regex_name_matches(&member.user.name)
-        || settings.blacklist.simplename.contains(&member.user.name)
-        || (member.user.avatar.is_some()
+    let regex_match = settings.blacklist.regex_name_matches(&member.user.name);
+    let simple_match = settings.blacklist.simplename.contains(&member.user.name);
+    let avatar_match = (member.user.avatar.is_some()
             && settings
                 .blacklist
                 .avatar
-                .contains(&member.user.avatar.as_ref().unwrap()))
-    {
+                .contains(&member.user.avatar.as_ref().unwrap()));
+    let reason = {
+        if avatar_match {
+            "avatar"
+        } else if regex_match {
+            "username by regex"
+        } else {  // simple_match must be true
+            "simple username"
+        }
+    };
+    if regex_match || simple_match || avatar_match {
         let outcome = match settings.blacklistaction {
             Action::Ban => {
                 let _ = member.user.direct_message(&ctx.http, |f| f.content("Hey bud. You tried to join a server but they don't like your name or pfp so you got banned.")).await;
                 let res = GuildId(guild)
-                    .ban_with_reason(&ctx.http, &member, 0, "Username matched the blacklist")
+                    .ban_with_reason(&ctx.http, &member, 0, format!("User matched the {} blacklist", reason))
                     .await;
                 ("Banned", "ban", res)
             }
             Action::Kick => {
                 let _ = member.user.direct_message(&ctx.http, |f| f.content("Hey bud. You tried to join a server but they don't like your name or pfp so you got booted.")).await;
                 let res = GuildId(guild)
-                    .kick_with_reason(&ctx.http, &member, "Username matched the blacklist")
+                    .kick_with_reason(&ctx.http, &member, &format!("User matched the {} blacklist", reason))
                     .await;
                 ("Kicked", "kick", res)
             }
@@ -93,19 +102,19 @@ pub async fn check_against_blacklist(
                 ("Muted", "mute", res)
             }
             Action::Nothing => {
-                ChannelId(settings.logs).say(&ctx.http, format!("New member {}#{} (id {2} - <@{2}>) matches the blacklist, but settings tell me to do nothing about it.", &member.user.name, &member.user.discriminator, member.user.id)).await;
+                ChannelId(settings.logs).say(&ctx.http, format!("New member {}#{} (id {2} - <@{2}>) matches the {3} blacklist, but settings tell me to do nothing about it.", &member.user.name, &member.user.discriminator, member.user.id, reason)).await;
                 return;
             }
         };
         match outcome.2 {
             Ok(_) => {
                 if settings.logs > 0 {
-                    ChannelId(settings.logs).say(&ctx.http, format!("{} {}#{} (id {3} - <@{3}>) because their name or avatar matches the blacklist", outcome.0, &member.user.name, &member.user.discriminator, member.user.id)).await;
+                    ChannelId(settings.logs).say(&ctx.http, format!("{} {}#{} (id {3} - <@{3}>) because they matches the {4} blacklist", outcome.0, &member.user.name, &member.user.discriminator, member.user.id, reason)).await;
                 }
             }
             Err(why) => {
                 if settings.logs > 0 {
-                    ChannelId(settings.logs).say(&ctx.http, format!("Tried and failed to {} {}#{} (id {3} - <@{3}>) because their name or avatar matches the blacklist. Please grant me more permissions so I can do my job better", outcome.1, &member.user.name, &member.user.discriminator, member.user.id)).await;
+                    ChannelId(settings.logs).say(&ctx.http, format!("Tried and failed to {} {}#{} (id {3} - <@{3}>) because their name or avatar matches the {4} blacklist. Please grant me more permissions so I can do my job better", outcome.1, &member.user.name, &member.user.discriminator, member.user.id, reason)).await;
                 }
                 println!("{}", why)
             }
@@ -146,7 +155,7 @@ pub async fn check_against_joins(ctx: &Context, guild: u64) {
     println!("Yeetus we panic");
     // PANIC!  WE'RE BEING RAIDED.  this is the turn-panic-on clause
     if !mom.panicking {
-        start_panicking(&ctx, mom, &settings, guild).await;
+        start_panicking(&ctx, mom, &settings, guild, false).await;
     }
     mom.panic_end = now as i64 + (max_time * 1000 * 4) as i64; // todo: note implementation here
 
@@ -244,6 +253,7 @@ pub(crate) async fn start_panicking(
     mom: &mut YourMama,
     settings: &Settings,
     guild_id: u64,
+    manually_started: bool,
 ) {
     println!("We starting to panic broooooo");
     mom.panicking = true;
@@ -253,7 +263,7 @@ pub(crate) async fn start_panicking(
     }
 
     if let Some(channel) = ctx.cache.guild_channel(guild_id).await {
-        if 0 < settings.notify {
+        if 0 < settings.notify && !manually_started {
             let r = channel
                 .say(
                     &ctx.http,

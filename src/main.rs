@@ -78,6 +78,9 @@ impl EventHandler for Handler {
             dbcontext.add_guild(id).await; // also adds to cache
         };
         set_status(&ctx).await;
+        if is_new {
+            greet_new_guild(&ctx, &guild).await;
+        }
     }
 
     async fn guild_member_addition(&self, ctx: Context, guild_id: GuildId, mut new_member: Member) {
@@ -133,6 +136,20 @@ impl EventHandler for Handler {
 
     async fn ready(&self, ctx: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
+    }
+}
+
+async fn greet_new_guild(ctx: &Context, guild: &Guild) {
+    if let Some(channel) = guild.default_channel_guaranteed().await {
+        channel.say(&ctx, "\
+            Thanks for adding me to the server! Here's some next steps:\n
+            Configure who can run most commands (like turning on or off panic mode): `run bb-settings set theroll Staff` for example (with a roll called Staff)\
+            I recommend that you set up a log channel for me to talk in (and set it like `bb-settings set logs #mychannel` but replace mychannel with the actual one) \
+            Also probs do a roll for me to ping when I automatically detect a raid and go into panic mode (`bb-settings set notify raidcleaners` - replacing raidcleaners with that roll)\n
+            Reviewing default settings is recommended - `bb-settings` and adjust them as you wish.
+            `bb-help` shows all my commands.
+            If you should find yourself needing support, there's a support server invite in `bb-about`\
+            ").await;
     }
 }
 
