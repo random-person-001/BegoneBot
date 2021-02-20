@@ -566,9 +566,12 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let g = &ctx.cache.guild(msg.guild_id.unwrap()).await.unwrap();
     let settings = dbcontext.get_settings(&g.id.0).await.expect("hmm");
 
+    println!("authorizing");
     if unauthorized(&ctx, settings, g, msg, PermissionLevel::CanChangeSettings).await {
+        println!("unauthorized");
         return Ok(());
     }
+    println!("authorized");
 
     let guild_id = msg.guild_id.expect("").0;
     let setting_name = args.single::<String>().unwrap().to_lowercase();
@@ -903,7 +906,7 @@ async fn unauthorized(
         PermissionLevel::CanChangeSettings => RoleId(settings.roll_that_can_change_settings),
     };
     let is_admin = match guild.member_permissions(&ctx, author).await {
-        Ok(p) => return p.contains(Permissions::ADMINISTRATOR),
+        Ok(p) => p.contains(Permissions::ADMINISTRATOR),
         Err(_) => false
     };
 
