@@ -42,6 +42,7 @@ use crate::commands::*;
 use std::convert::TryInto;
 use std::process::exit;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::time::{sleep, Duration};
 
 // A container type is created for inserting into the Client's `data`, which
 // allows for data to be accessible across all events and framework commands, or
@@ -76,11 +77,9 @@ impl EventHandler for Handler {
         } else {
             println!("Creating a new settings row for guild {}", id);
             dbcontext.add_guild(id).await; // also adds to cache
+            greet_new_guild(&ctx, &guild).await;
         };
         set_status(&ctx).await;
-        if is_new {
-            greet_new_guild(&ctx, &guild).await;
-        }
     }
 
     async fn guild_member_addition(&self, ctx: Context, guild_id: GuildId, mut new_member: Member) {
@@ -139,17 +138,59 @@ impl EventHandler for Handler {
     }
 }
 
+pub async fn BETTER_default_channel(guild: &Guild, uid: UserId) -> Option<Vec<&GuildChannel>> {
+    let member = guild.members.get(&uid)?;
+    let mut out = vec![];
+
+    for channel in guild.channels.values() {
+        if channel.kind == ChannelType::Text
+            && guild
+                .user_permissions_in(channel, member)
+                .ok()?
+                .send_messages()
+            && guild
+                .user_permissions_in(channel, member)
+                .ok()?
+                .read_messages()
+        {
+            let x = guild.user_permissions_in(channel, member).expect("goo");
+            //return Some(channel);
+            dbg!(x);
+            println!("{:?}", x.bits);
+            println!("{}", channel.name);
+            out.push(channel);
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 async fn greet_new_guild(ctx: &Context, guild: &Guild) {
-    if let Some(channel) = guild.default_channel_guaranteed().await {
-        channel.say(&ctx, "\
+    println!("h");
+    if let Some(channelvec) = BETTER_default_channel(guild, UserId(802019556801511424_u64)).await {
+        println!("i");
+        for channel in channelvec {
+            println!("{}", channel.name);
+            let res = channel.say(&ctx, "
             Thanks for adding me to the server! Here's some next steps:\n
-            Configure who can run most commands (like turning on or off panic mode): `run bb-settings set theroll Staff` for example (with a roll called Staff)\
-            I recommend that you set up a log channel for me to talk in (and set it like `bb-settings set logs #mychannel` but replace mychannel with the actual one) \
-            Also probs do a roll for me to ping when I automatically detect a raid and go into panic mode (`bb-settings set notify raidcleaners` - replacing raidcleaners with that roll)\n
-            Reviewing default settings is recommended - `bb-settings` and adjust them as you wish.
-            `bb-help` shows all my commands.
-            If you should find yourself needing support, there's a support server invite in `bb-about`\
+Configure who can run most commands (like turning on or off panic mode): run `bb-settings set roll_that_can_panic Staff` for example (if you have a roll called Staff)\n
+I recommend that you set up a log channel for me to talk in (and set it like `bb-settings set logs #mychannel` but replace mychannel with the actual one) \n
+Also probs tell me a roll for me to ping when I automatically detect a raid and go into panic mode (`bb-settings set notify raidresponders` - replacing raidresponders with that roll)\n
+Reviewing default settings is recommended - `bb-settings` and adjust them as you wish. `bb-help` shows all my commands.\n
+If you should find yourself needing support, there's a support server invite in `bb-about`\
             ").await;
+            if res.is_ok() {
+                return;
+            }
+        }
+    } else {
+        println!(
+            "hey i wanted to greet {} {} but they wont let everyone talk",
+            guild.name, guild.id.0
+        );
     }
 }
 
@@ -161,7 +202,7 @@ async fn set_status(ctx: &Context) {
 
 #[group]
 #[summary = "Good commands to have around"]
-#[commands(panic, uinfo, forceban, hel)]
+#[commands(panic, uinfo, forceban, hel, delete)]
 struct General;
 
 #[group]

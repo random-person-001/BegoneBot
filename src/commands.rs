@@ -1,8 +1,10 @@
-use crate::autopanic;
 use crate::autopanic::Gramma;
 use crate::db::{Action, MyDbContext};
+use crate::{autopanic, db, Settings};
 use serenity::builder::CreateMessage;
 use serenity::model::channel::Embed;
+use serenity::model::guild::Guild;
+use serenity::model::id::{GuildId, RoleId};
 use serenity::{
     framework::standard::{
         macros::{check, command},
@@ -13,6 +15,26 @@ use serenity::{
 };
 use std::convert::TryInto;
 use std::process::exit;
+
+// todo: remove in production
+#[command]
+async fn delete(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
+    let mut data = ctx.data.write().await;
+    let mut dbcontext = data
+        .get_mut::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.");
+    let guild: u64 = match msg.guild_id {
+        Some(id) => id.0,
+        None => 0,
+    };
+    if dbcontext.drop_guild(&guild).await {
+        msg.channel_id.say(&ctx, "yeet").await;
+    } else {
+        msg.channel_id.say(&ctx, "sad").await;
+    }
+
+    Ok(())
+}
 
 #[command]
 async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
@@ -34,16 +56,12 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
     msg.channel_id.send_message(&ctx, |m| m.embed(|e| {
         e.title("About");
         e.description(format!(
-        "I'm a small antiraid bot in rust written by John Locke#2742 serving {} guilds\n
-        I don't intend to \n\n\
-        instead of writing out settings or blacklist, you can shorten them to s and bl respectively.\
+        "I'm a focused and powerful antiraid bot in rust written by John Locke#2742 serving {} guilds
+
+        Pro tip: instead of writing out settings or blacklist, you can shorten them to s and bl respectively.\
         ",
         guild_count));
-        e.field("Links","[Support server](https://discord.gg/eGNDZGdtaR)  |  [invite me](https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=18503)", false);
-        e.footer(|f| {
-            f.text(".");
-            f
-        });
+        e.field("Links","[Support server](https://discord.gg/eGNDZGdtaR)  |  [invite me](https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=268716070)", false);
         e
     })).await;
     Ok(())
@@ -56,17 +74,18 @@ async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
 }
 
 #[command]
-#[required_permissions("ADMINISTRATOR")]
 async fn blacklist_show(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let data = ctx.data.write().await;
     let dbcontext = data
         .get::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-    let s = &dbcontext.get_settings(&guild).await.expect("hmm").blacklist;
+    let g = &ctx.cache.guild(msg.guild_id.unwrap()).await.unwrap();
+
+    let settings = dbcontext.get_settings(&g.id.0).await.expect("hmm");
+
+    if unauthorized(&ctx, settings, g, msg, PermissionLevel::CanPanic).await {
+        return Ok(());
+    }
 
     let msg = msg
         .channel_id
@@ -76,7 +95,7 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args: Args) -> CommandResu
                 e.color(0x070707);
                 e.description(" \
                  • To adjust what happens when a member joins who matches a blacklist item, use `bb-settings set blacklistaction` with `ban`, `kick`, `mute`, or `nothing` at the end (default is kick). \n \
-                 • To blacklist anyone who has the same profile picture (avatar) as the user 802019556801511424, run `bb-uinfo 802019556801511424` \n \
+                 • To blacklist anyone who has the same profile picture (avatar) as the user 802019556801511424, run `bb-blacklist add avatar 802019556801511424` \n \
                  • To blacklist any users who are named EvilBotnet, run `bb-blacklist add name EvilBotnet` \n \
                  • To blacklist anyone named like DMSpammer4 or DMSpammer87, run `bb-blacklist add regexname DMSpammer\\d+` \
                 Regex is extremely powerful, and there are many resources on the web to help you, like [this](https://regex101.com/). \
@@ -87,13 +106,13 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args: Args) -> CommandResu
                 When talking about these lists in commands (like those examples above), call them `name` `regexname` and `avatar` respectively. \
                 ");
                 e.field("Simple name blacklist",
-                format!("(will match username exactly)\n`{:?}`", s.simplename),
+                format!("(will match username exactly)\n`{:?}`", settings.blacklist.simplename),
                 false);
                 e.field("Regex name blacklist",
-                format!("(will match username by regex)\n`{:?}`", s.regexname),
+                format!("(will match username by regex)\n`{:?}`", settings.blacklist.regexname),
                 false);
                 e.field("Avatar hash blacklist",
-                format!("(will match an avatar's hash, which is unique to a profile picture. Due to technical limitations, from here you can't see the pictures they're referring to, but you could try searching them in chat)\n`{:?}`", s.avatar),
+                format!("(will match an avatar's hash, which is unique to a profile picture. Due to technical limitations, from here you can't see the pictures they're referring to, but you could try searching them in chat)\n`{:?}`", settings.blacklist.avatar),
                 false);
                 e
             });
@@ -104,22 +123,20 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args: Args) -> CommandResu
 }
 
 #[command]
-#[required_permissions("ADMINISTRATOR")]
 async fn add(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-    let mut s = dbcontext
-        .get_settings(&guild)
-        .await
-        .expect("hmm")
-        .blacklist
-        .clone();
+
+    let g = &ctx.cache.guild(msg.guild_id.unwrap()).await.unwrap();
+    let settings = dbcontext.get_settings(&g.id.0).await.expect("hmm");
+
+    if unauthorized(&ctx, settings, g, msg, PermissionLevel::CanChangeSettings).await {
+        return Ok(());
+    }
+
+    let mut s = settings.blacklist.clone();
 
     if args.len() != 2 {
         println!("{:?}", args);
@@ -137,7 +154,7 @@ async fn add(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 Ok(s) => s,
                 Err(_) => {
                     msg.channel_id.say(&ctx.http, "broski i needed a user id there. If you wanna blacklist the avatar that some user 4534 has, run `bb-blacklist add avatar 4534`").await;
-                    return Ok(())
+                    return Ok(());
                 }
             };
             match UserId(uid).to_user(&ctx).await {
@@ -147,7 +164,12 @@ async fn add(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                         msg.channel_id.say(&ctx, format!("The user {0} - {1}#{2} has an avatar hash of {3}\nhttps://cdn.discordapp.com/avatars/{0}/{3}",
                         u.id, u.name, u.discriminator, u.avatar.unwrap())).await;
                     } else {
-                        msg.channel_id.say(&ctx, "Bro they have the default avatar so imma say nope to that").await;
+                        msg.channel_id
+                            .say(
+                                &ctx,
+                                "Bro they have the default avatar so imma say nope to that",
+                            )
+                            .await;
                         return Ok(());
                     }
                 }
@@ -156,13 +178,13 @@ async fn add(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                     return Ok(());
                 }
             }
-        },
+        }
         _ => {
             msg.channel_id.say(&ctx.http, "Broski....... please specify the blacklist you're trying to add to here. It can be one of `name` `regexname` `avatar`").await;
             return Ok(());
         }
     };
-    if dbcontext.save_blacklist(&guild, s).await {
+    if dbcontext.save_blacklist(&g.id.0, s).await {
         msg.channel_id.say(&ctx.http, ":+1: Added").await;
     } else {
         msg.channel_id
@@ -173,17 +195,20 @@ async fn add(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 }
 
 #[command]
-#[required_permissions("ADMINISTRATOR")]
 /// usage: bb-blacklist remove nameregex 4 to run settings.blacklist[3].pop()
 async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
+
+    let g = &ctx.cache.guild(msg.guild_id.unwrap()).await.unwrap();
+    let settings = dbcontext.get_settings(&g.id.0).await.expect("hmm");
+    let mut s = settings.blacklist.clone();
+
+    if unauthorized(&ctx, settings, g, msg, PermissionLevel::CanChangeSettings).await {
+        return Ok(());
+    }
 
     if args.len() != 2 {
         println!("{:?}", args);
@@ -200,12 +225,6 @@ async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             return Ok(());
         }
     };
-    let mut s = dbcontext
-        .get_settings(&guild)
-        .await
-        .expect("hmm")
-        .blacklist
-        .clone();
 
     let mut removed = String::new();
     match &*which_list {
@@ -247,7 +266,7 @@ async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             return Ok(());
         }
     };
-    if dbcontext.save_blacklist(&guild, s).await {
+    if dbcontext.save_blacklist(&g.id.0, s).await {
         msg.channel_id
             .say(&ctx.http, format!("Successfully removed `{}`", removed))
             .await;
@@ -258,18 +277,20 @@ async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 }
 
 #[command]
-#[required_permissions("ADMINISTRATOR")]
 async fn reset(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
 
-    if dbcontext.add_guild(&guild).await {
+    let g = &ctx.cache.guild(msg.guild_id.unwrap()).await.unwrap();
+    let settings = dbcontext.get_settings(&g.id.0).await.expect("hmm");
+
+    if unauthorized(&ctx, settings, g, msg, PermissionLevel::CanChangeSettings).await {
+        return Ok(());
+    }
+
+    if dbcontext.add_guild(&g.id.0).await {
         msg.channel_id
             .say(&ctx.http, "Successfully reset all settings")
             .await?;
@@ -393,16 +414,25 @@ async fn uinfo(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 }
 
 #[command]
-#[required_permissions("ADMINISTRATOR")]
 async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    let mut data = ctx.data.write().await;
-    let guild_id = msg.guild_id.expect("infallible").0;
+    let settings = {
+        let data = ctx.data.write().await;
+        let dbcontext = data
+            .get::<MyDbContext>()
+            .expect("Expected MyDbContext in TypeMap.");
 
-    let dbcontext = data
-        .get::<MyDbContext>()
-        .expect("Expected MyDbContext in TypeMap.");
-    let settings = dbcontext.get_settings(&guild_id).await.unwrap().clone();
-    let mut mom = data
+        let g = &ctx.cache.guild(msg.guild_id.unwrap()).await.unwrap();
+        let guild_id = g.id.0;
+        let settings = dbcontext.get_settings(&g.id.0).await.expect("hmm").clone();
+
+        if unauthorized(&ctx, &settings, g, msg, PermissionLevel::CanPanic).await {
+            return Ok(());
+        }
+        settings
+    };
+    let guild_id = msg.guild_id.unwrap().0;
+    let mut data2 = ctx.data.write().await;
+    let mut mom = data2
         .get_mut::<Gramma>()
         .expect("Expected your momma in TypeMap.")
         .get(&guild_id);
@@ -474,7 +504,9 @@ The following are the settings you can adjust:";
             e.field("time", "When `users` join in this amount of seconds, a raid panic is triggered. A number", false);
             e.field("logs", "What channel to post raid notifications. Is none by default. A blue channel name", false);
             e.field("notify", "When a raid panic starts, this roll is pinged in the `logs` channel.  A roll id or mention or written name", false);
-            e.field("muteroll", "If an action is to apply a mute to someone upon joining, this is that mute roll.  A roll id or mention or written name", false);
+            e.field("roll_that_can_change_settings", "Anyone with this roll or who is above it can change settings and alter the blacklist. A roll mention or name", false);
+            e.field("roll_that_can_panic", "Anyone with this roll or higher can manually turn panic mode on and off, as well as view all settings. A roll mention or name", false);
+            e.field("muteroll", "If an action is to apply a mute to someone upon joining, this is that mute roll.  A roll mention or name", false);
             e.field("blacklistaction", "When a new member joins who matches the blacklist, this will be done to them. One of `ban` `kick` `mute` `nothing`", false);
             e.field(".", "Adding and removing from blacklists can be done with `bb-blacklist`", false);
             e.footer(|f| {
@@ -516,7 +548,6 @@ async fn hel(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
 }
 
 #[command]
-#[required_permissions("ADMINISTRATOR")]
 async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     if args.is_empty() {
         options(&ctx, &msg).await;
@@ -526,6 +557,15 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
+
+
+    let g = &ctx.cache.guild(msg.guild_id.unwrap()).await.unwrap();
+    let settings = dbcontext.get_settings(&g.id.0).await.expect("hmm");
+
+    if unauthorized(&ctx, settings, g, msg, PermissionLevel::CanChangeSettings).await {
+        return Ok(());
+    }
+
     let guild_id = msg.guild_id.expect("").0;
     let setting_name = args.single::<String>().unwrap().to_lowercase();
 
@@ -569,7 +609,9 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             if let Some(settings) = dbcontext.get_settings(&guild_id).await {
                 if choice == Action::Mute && settings.muteroll == 0 {
                     let mut roll: u64 = 0;
-                    if let Some(rol) = get_roll_id_by_name_case_insensitive(&ctx, &msg, "muted").await {
+                    if let Some(rol) =
+                        get_roll_id_by_name_case_insensitive(&ctx, &msg, "muted").await
+                    {
                         roll = rol;
                     }
 
@@ -671,6 +713,20 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             };
             choice as i64
         }
+        "roll_that_can_panic" => {
+            if let Some(h) = get_roll_from_set_command(&ctx, &msg, &choice).await {
+                h
+            } else {
+                return Ok(());
+            }
+        }
+        "roll_that_can_change_settings" => {
+            if let Some(h) = get_roll_from_set_command(&ctx, &msg, &choice).await {
+                h
+            } else {
+                return Ok(());
+            }
+        }
         _ => {
             msg.channel_id.say(&ctx.http, "I didn't recognize that setting you tried to change. Run `bb-settings set` to see usage").await;
             return Ok(());
@@ -691,7 +747,8 @@ async fn get_roll_from_set_command(ctx: &Context, msg: &Message, choice: &str) -
     Some(
         (if let Some(rol) = get_roll_id_by_name(&ctx, &msg, &choice[..]).await {
             rol
-        } else if let Some(rol) = get_roll_id_by_name_case_insensitive(&ctx, &msg, &choice.to_lowercase()[..]).await
+        } else if let Some(rol) =
+            get_roll_id_by_name_case_insensitive(&ctx, &msg, &choice.to_lowercase()[..]).await
         {
             rol
         } else if let Some(rol) = id_from_mention(&choice[..]) {
@@ -704,35 +761,26 @@ async fn get_roll_from_set_command(ctx: &Context, msg: &Message, choice: &str) -
     )
 }
 
-#[command]
-#[required_permissions("ADMINISTRATOR")]
-async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
-    // redundant perm check is necessary cuz lib bypasses the perms when running a group default command
-    let g = ctx
-        .cache
-        .guild(msg.guild_id.unwrap())
-        .await
-        .expect("wtf bro");
-    match g.member_permissions(&ctx.http, msg.author.id).await {
-        Ok(p) => {
-            if !p.contains(Permissions::ADMINISTRATOR) {
-                return Ok(());
-            }
-        }
-        Err(_) => return Ok(()),
-    };
 
+#[command]
+async fn show(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+    // redundant perm check is necessary cuz lib bypasses the perms when running a group default command
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
 
-    let settings = dbcontext.get_settings(&guild).await;
-    let settings = settings.unwrap();
+    let g = &ctx.cache.guild(msg.guild_id.unwrap()).await.unwrap();
+    let settings = dbcontext.get_settings(&g.id.0).await.expect("hmm");
+
+    if unauthorized(&ctx, settings, g, msg, PermissionLevel::CanPanic).await {
+        return Ok(());
+    }
+
+    if !args.is_empty() {
+        msg.channel_id.say(&ctx, "Hey looks like you put something after your command. Did you remember to include `set` after `bb-settings`?").await;
+    }
+
     msg.channel_id.send_message(&ctx.http, |m| m.embed(|e| {
         e.title("Settings");
         e.color(0x4d8290);
@@ -766,8 +814,10 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         ),
             false);
         e.field("General", format!("\
-            {}.\
-            Ping spam limits are {}.",
+            {}.\n\
+            Ping spam limits are {}.\n\
+            {} can view settings and toggle panic mode.\n\
+            {} can change settings and alter the blacklist",
 
         if let 0 = settings.logs {
             String::from("__No__ logging channel is configured")
@@ -790,7 +840,17 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
                 Action::Mute => "muted",
                 Action::Nothing => "this state is not reachable in code",
             }, settings.usermentions, settings.rollmentions, settings.anymentions, settings.mentiontime)
-        }
+        },
+            if settings.roll_that_can_panic > 0 {
+                format!("__<@&{}>__ and higher", settings.roll_that_can_panic)
+            } else {
+                String::from("__Server admins__")
+            },
+            if settings.roll_that_can_change_settings > 0 {
+                format!("__<@&{}>__ and higher", settings.roll_that_can_change_settings)
+            } else {
+                String::from("__Server admins__")
+            },
         ),
         false);
         e.field("Blacklists", format!("
@@ -817,6 +877,64 @@ async fn show(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     // https://github.com/serenity-rs/serenity/blob/current/examples/e09_create_message_builder/src/main.rs
     Ok(())
 }
+
+
+enum PermissionLevel {
+    CanPanic,
+    CanChangeSettings,
+}
+
+// return whether someone is authorized to run a command or not.  Will send a helpful message if they aren't
+async fn unauthorized(
+    ctx: &Context,
+    settings: &db::Settings,
+    guild: &Guild,
+    msg: &Message,
+    perm_level: PermissionLevel,
+) -> bool {
+
+    let author = msg.author.id;
+    let critical_roll = &match perm_level {
+        PermissionLevel::CanPanic => RoleId(settings.roll_that_can_panic),
+        PermissionLevel::CanChangeSettings => RoleId(settings.roll_that_can_change_settings),
+    };
+    let is_admin = match guild.member_permissions(&ctx, author).await {
+        Ok(p) => return p.contains(Permissions::ADMINISTRATOR),
+        Err(_) => false
+    };
+
+    return if settings.roll_that_can_panic == 0 || !guild.roles.contains_key(critical_roll) {
+        match is_admin {
+            true => false,
+            false => {
+                msg.channel_id.say(&ctx, format!("Since nothing is set for my `{0}` setting, I require you to have admin perms here to run that command. Run `bb-settings set {0} Staff` for example to let the roll named @Staff run this command", match perm_level {
+                    PermissionLevel::CanPanic => "roll_that_can_panic",
+                    PermissionLevel::CanChangeSettings => "roll_that_can_change_settings"
+                })).await;
+                true
+            }
+        }
+    } else if guild
+        .members
+        .get(&author)
+        .unwrap()
+        .roles
+        .contains(critical_roll) || is_admin
+    {
+        false
+    } else {
+        let roll_name = &guild.roles.get(critical_roll).unwrap().name;
+        msg.channel_id.say(&ctx, format!("Hey my settings here require you to have the {} roll to run that.  A high ranking member can change that by running `bb-settings set {} Staff` for instance to let anyone with the Staff roll use this",
+                                         roll_name,
+                                         match perm_level {
+                                             PermissionLevel::CanPanic => "roll_that_can_panic",
+                                             PermissionLevel::CanChangeSettings => "roll_that_can_change_settings"
+                                         },
+        )).await;
+        true
+    }
+}
+
 
 /// Retrieves the nth `char` of a `&str`
 /// If `n < 0` then it will always retrieve the final `char`
@@ -850,12 +968,19 @@ fn id_from_mention(s: &str) -> Option<u64> {
     }
 }
 
-
 /// Find a roll id such that roll.lowercase() == msg (assumed to be lowercase)
-async fn get_roll_id_by_name_case_insensitive(ctx: &Context, msg: &Message, name: &str) -> Option<u64> {
+async fn get_roll_id_by_name_case_insensitive(
+    ctx: &Context,
+    msg: &Message,
+    name: &str,
+) -> Option<u64> {
     if let Some(guild_id) = msg.guild_id {
         if let Some(guild) = guild_id.to_guild_cached(&ctx).await {
-            if let Some(role) = guild.roles.values().find(|role| name == role.name.clone().to_lowercase()) {
+            if let Some(role) = guild
+                .roles
+                .values()
+                .find(|role| name == role.name.clone().to_lowercase())
+            {
                 println!("yeeeeeeetus");
                 return Some(role.id.0);
             }

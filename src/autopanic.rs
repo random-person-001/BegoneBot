@@ -67,16 +67,17 @@ pub async fn check_against_blacklist(
     let regex_match = settings.blacklist.regex_name_matches(&member.user.name);
     let simple_match = settings.blacklist.simplename.contains(&member.user.name);
     let avatar_match = (member.user.avatar.is_some()
-            && settings
-                .blacklist
-                .avatar
-                .contains(&member.user.avatar.as_ref().unwrap()));
+        && settings
+            .blacklist
+            .avatar
+            .contains(&member.user.avatar.as_ref().unwrap()));
     let reason = {
         if avatar_match {
             "avatar"
         } else if regex_match {
             "username by regex"
-        } else {  // simple_match must be true
+        } else {
+            // simple_match must be true
             "simple username"
         }
     };
@@ -85,14 +86,23 @@ pub async fn check_against_blacklist(
             Action::Ban => {
                 let _ = member.user.direct_message(&ctx.http, |f| f.content("Hey bud. You tried to join a server but they don't like your name or pfp so you got banned.")).await;
                 let res = GuildId(guild)
-                    .ban_with_reason(&ctx.http, &member, 0, format!("User matched the {} blacklist", reason))
+                    .ban_with_reason(
+                        &ctx.http,
+                        &member,
+                        0,
+                        format!("User matched the {} blacklist", reason),
+                    )
                     .await;
                 ("Banned", "ban", res)
             }
             Action::Kick => {
                 let _ = member.user.direct_message(&ctx.http, |f| f.content("Hey bud. You tried to join a server but they don't like your name or pfp so you got booted.")).await;
                 let res = GuildId(guild)
-                    .kick_with_reason(&ctx.http, &member, &format!("User matched the {} blacklist", reason))
+                    .kick_with_reason(
+                        &ctx.http,
+                        &member,
+                        &format!("User matched the {} blacklist", reason),
+                    )
                     .await;
                 ("Kicked", "kick", res)
             }
@@ -109,7 +119,19 @@ pub async fn check_against_blacklist(
         match outcome.2 {
             Ok(_) => {
                 if settings.logs > 0 {
-                    ChannelId(settings.logs).say(&ctx.http, format!("{} {}#{} (id {3} - <@{3}>) because they matches the {4} blacklist", outcome.0, &member.user.name, &member.user.discriminator, member.user.id, reason)).await;
+                    ChannelId(settings.logs)
+                        .say(
+                            &ctx.http,
+                            format!(
+                                "{} {}#{} (id {3} - <@{3}>) because they matches the {4} blacklist",
+                                outcome.0,
+                                &member.user.name,
+                                &member.user.discriminator,
+                                member.user.id,
+                                reason
+                            ),
+                        )
+                        .await;
                 }
             }
             Err(why) => {

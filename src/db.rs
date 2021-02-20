@@ -9,6 +9,9 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::error::Error;
 
+// Todo: prevent Catastrophic backtracking in regex input
+//   either timeout the query or detect and reject backtracking
+
 /// What to do to noobs when shit hits the fan (autopanic on)
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Action {
@@ -124,6 +127,8 @@ pub struct Settings {
     pub notify: u64, // who to ping in logs when stuff goes down
     pub blacklist: Blacklist,
     pub blacklistaction: Action,
+    pub roll_that_can_panic: u64,
+    pub roll_that_can_change_settings: u64,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -143,6 +148,8 @@ struct RawSettings {
     notify: u64,
     blacklist: Vec<u8>,
     blacklistaction: i64,
+    roll_that_can_panic: i64,
+    roll_that_can_change_settings: i64,
 }
 
 impl From<RawSettings> for Settings {
@@ -163,6 +170,8 @@ impl From<RawSettings> for Settings {
             notify: s.notify,
             blacklist: Blacklist::from_bytes(s.blacklist),
             blacklistaction: s.blacklistaction.try_into().unwrap(),
+            roll_that_can_panic: s.roll_that_can_panic.try_into().unwrap(),
+            roll_that_can_change_settings: s.roll_that_can_change_settings.try_into().unwrap(),
         }
     }
 }
@@ -198,7 +207,10 @@ impl MyDbContext {
                 mentiontime INTEGER DEFAULT 5,
                 notify INTEGER DEFAULT 0,
                 blacklist BLOB DEFAULT NULL,
-                blacklistaction INTEGER DEFAULT 1
+                blacklistaction INTEGER DEFAULT 1,
+                roll_that_can_panic INTEGER DEFAULT 0,
+                roll_that_can_change_settings INTEGER DEFAULT 0
+
                 );
             ";
         match sqlx::query(q).execute(&self.pool).await {
@@ -210,13 +222,17 @@ impl MyDbContext {
         }
     }
 
-    pub async fn add_guild(&mut self, guild: &u64) -> bool {
-        self.add_guild_table().await;
+    pub async fn drop_guild(&mut self, guild: &u64) -> bool {
         sqlx::query("DELETE FROM settings WHERE guild=?1;")
             .bind(&guild)
             .execute(&self.pool)
             .await
-            .is_ok();
+            .is_ok()
+    }
+
+    pub async fn add_guild(&mut self, guild: &u64) -> bool {
+        self.add_guild_table().await;
+        self.drop_guild(guild).await;
         match sqlx::query("INSERT INTO settings (guild, blacklist) VALUES (?1, ?2);")
             .bind(&guild)
             .bind(Blacklist::new().to_bytes())
@@ -251,7 +267,7 @@ impl MyDbContext {
                 None
             }
         };
-        println!("{:?}", s);
+        //println!("{:?}", s);
         match s {
             Some(s) => Some(s.try_into().unwrap()),
             None => None,
@@ -323,6 +339,12 @@ impl MyDbContext {
                     "mentionaction" => settings.mentionaction = value.try_into().unwrap(),
                     "notify" => settings.notify = value.try_into().unwrap(),
                     "blacklistaction" => settings.blacklistaction = value.try_into().unwrap(),
+                    "roll_that_can_panic" => {
+                        settings.roll_that_can_panic = value.try_into().unwrap()
+                    }
+                    "roll_that_can_change_settings" => {
+                        settings.roll_that_can_change_settings = value.try_into().unwrap()
+                    }
                     s => {
                         println!(
                             "Broski I couldn't update the cached settings cuz {} wasn't in there",
