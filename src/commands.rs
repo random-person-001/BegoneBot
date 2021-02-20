@@ -16,9 +16,11 @@ use serenity::{
 use std::convert::TryInto;
 use std::process::exit;
 
-// todo: remove in production
 #[command]
 async fn delete(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
+    if msg.author.id.0 != 275384719024193538 {
+        return Ok(())
+    }
     let mut data = ctx.data.write().await;
     let mut dbcontext = data
         .get_mut::<MyDbContext>()
@@ -56,7 +58,9 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
     msg.channel_id.send_message(&ctx, |m| m.embed(|e| {
         e.title("About");
         e.description(format!(
-        "I'm a focused and powerful antiraid bot in rust written by John Locke#2742 serving {} guilds
+        "I'm a focused and powerful antiraid bot in rust written by John Locke#2742 serving {} guilds.
+
+        I'm completely free and will never have any paywalled features. However, if you appreciate my service, you can consider donating in the support server to keep me running.
 
         Pro tip: instead of writing out settings or blacklist, you can shorten them to s and bl respectively.\
         ",
@@ -519,7 +523,7 @@ The following are the settings you can adjust:";
 }
 
 #[command]
-async fn hel(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
+async fn help(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
     msg.channel_id.send_message(&ctx.http, |m| {
             m.embed(|e| {
                 e.title("BegoneBot Help");

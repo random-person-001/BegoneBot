@@ -44,7 +44,6 @@ impl From<i64> for Action {
     }
 }
 
-/// todo: store this in the db later
 #[derive(Debug, Clone, sqlx::FromRow, sqlx::Encode, sqlx::Decode, sqlx::Type)]
 pub struct Blacklist {
     pub simplename: Vec<String>,

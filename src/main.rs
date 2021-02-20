@@ -89,7 +89,7 @@ impl EventHandler for Handler {
             let mut grammy = data
                 .get_mut::<autopanic::Gramma>()
                 .expect("Expected your momma in TypeMap.");
-            let mut mom = grammy.get(&guild_id.0);
+            let mut mom= grammy.get(&guild_id.0);
             mom.recent_users.insert(
                 new_member
                     .joined_at
@@ -180,7 +180,7 @@ Configure who can run most commands (like turning on or off panic mode): run `bb
 I recommend that you set up a log channel for me to talk in (and set it like `bb-settings set logs #mychannel` but replace mychannel with the actual one) \n
 Also probs tell me a roll for me to ping when I automatically detect a raid and go into panic mode (`bb-settings set notify raidresponders` - replacing raidresponders with that roll)\n
 Reviewing default settings is recommended - `bb-settings` and adjust them as you wish. `bb-help` shows all my commands.\n
-If you should find yourself needing support, there's a support server invite in `bb-about`\
+If you find yourself needing support, there's a support server invite in `bb-about`\
             ").await;
             if res.is_ok() {
                 return;
@@ -201,12 +201,10 @@ async fn set_status(ctx: &Context) {
 }
 
 #[group]
-#[summary = "Good commands to have around"]
-#[commands(panic, uinfo, forceban, hel, delete)]
+#[commands(panic, uinfo, forceban, help, delete)]
 struct General;
 
 #[group]
-#[summary = "You probably can ignore these"]
 #[commands(about, ping, die)] // status)]
 struct Meta;
 
@@ -217,9 +215,7 @@ struct Meta;
 #[prefixes("settings", "s")]
 // Set a description to appear if a user wants to display a single group
 // e.g. via help using the group-name or one of its prefixes.
-#[description = "Adjust settings"]
 // Summary only appears when listing multiple groups.
-#[summary = "Adjust settings. Run bb-settings so see them"]
 // Sets a command that will be executed if only a group-prefix was passed.
 #[default_command(show)]
 #[commands(reset, set)]
@@ -227,50 +223,11 @@ struct Settings;
 
 #[group]
 #[prefixes("blacklist", "bl")]
-#[summary = "Blacklist for incoming members. Run bb-blacklist for more"]
 #[default_command(blacklist_show)]
 #[commands(remove, add)]
 struct Blacklist;
 
-#[help]
-// This replaces the information that a user can pass
-// a command-name as argument to gain specific information about it.
-#[individual_command_tip = "Hello! こんにちは！Hola! Bonjour! 您好! 안녕하세요~\n\n\
-I'm a bot that helps protect servers against raids. For now, I am not hosted constantly and only people with admin perms can use my best commands"]
-// Some arguments require a `{}` in order to replace it with contextual information.
-// In this case our `{}` refers to a command's name.
-#[command_not_found_text = "Could not find: `{}`."]
-// Define the maximum Levenshtein-distance between a searched command-name
-// and commands. If the distance is lower than or equal the set distance,
-// it will be displayed as a suggestion.
-// Setting the distance to 0 will disable suggestions.
-#[max_levenshtein_distance(3)]
-// On another note, you can set up the help-menu-filter-behaviour.
-// Here are all possible settings shown on all possible options.
-// First case is if a user lacks permissions for a command, we can hide the command.
-#[lacking_permissions = "Hide"]
-// If the user is nothing but lacking a certain role, we just display it hence our variant is `Nothing`.
-#[lacking_role = "Nothing"]
-// The last `enum`-variant is `Strike`, which ~~strikes~~ a command.
-//#[wrong_channel = "Nothing"]
-// Serenity will automatically analyse and generate a hint/tip explaining the possible
-// cases of ~~strikethrough-commands~~, but only if
-// `strikethrough_commands_tip_in_{dm, guild}` aren't specified.
-// If you pass in a value, it will be displayed instead.
-#[strikethrough_commands_tip_in_guild = ""]
-async fn my_help(
-    context: &Context,
-    msg: &Message,
-    args: Args,
-    help_options: &'static HelpOptions,
-    groups: &[&'static CommandGroup],
-    owners: HashSet<UserId>,
-) -> CommandResult {
-    let _ = help_commands::with_embeds(context, msg, args, help_options, groups, owners).await;
-    Ok(())
-}
-
-#[hook]
+#[hook]  // this appears not to work
 async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
     println!(
         "Got command '{}' by user '{}'",
@@ -345,7 +302,6 @@ async fn main() {
         // The `#[group]` macro generates `static` instances of the options set for the group.
         // They're made in the pattern: `#name_GROUP` for the group instance and `#name_GROUP_OPTIONS`.
         // #name is turned all uppercase
-        .help(&MY_HELP)
         .group(&GENERAL_GROUP)
         .group(&BLACKLIST_GROUP)
         .group(&SETTINGS_GROUP)
@@ -356,7 +312,7 @@ async fn main() {
         .framework(framework)
         .intents(
             GatewayIntents::GUILDS | GatewayIntents::GUILD_MESSAGES | GatewayIntents::privileged(),
-        ) // TODO: more of these!
+        )
         .await
         .expect("Err creating client");
 
