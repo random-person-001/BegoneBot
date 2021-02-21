@@ -1,4 +1,5 @@
 #![allow(unused)]
+#![allow(non_snake_case)]
 use crate::db::MyDbContext;
 use serenity::model::prelude::*;
 use sqlx::Result;
@@ -32,11 +33,13 @@ use std::{
 
 use serenity::prelude::*;
 use tokio::sync::Mutex;
+mod admin_commands;
 mod autopanic;
 mod blob_blacklist_conversions;
 mod commands;
 mod db;
 
+use crate::admin_commands::*;
 use crate::autopanic::*;
 use crate::commands::*;
 use std::convert::TryInto;
@@ -89,7 +92,7 @@ impl EventHandler for Handler {
             let mut grammy = data
                 .get_mut::<autopanic::Gramma>()
                 .expect("Expected your momma in TypeMap.");
-            let mut mom= grammy.get(&guild_id.0);
+            let mut mom = grammy.get(&guild_id.0);
             mom.recent_users.insert(
                 new_member
                     .joined_at
@@ -138,7 +141,7 @@ impl EventHandler for Handler {
     }
 }
 
-pub async fn BETTER_default_channel(guild: &Guild, uid: UserId) -> Option<Vec<&GuildChannel>> {
+pub async fn better_default_channel(guild: &Guild, uid: UserId) -> Option<Vec<&GuildChannel>> {
     let member = guild.members.get(&uid)?;
     let mut out = vec![];
 
@@ -170,7 +173,7 @@ pub async fn BETTER_default_channel(guild: &Guild, uid: UserId) -> Option<Vec<&G
 
 async fn greet_new_guild(ctx: &Context, guild: &Guild) {
     println!("h");
-    if let Some(channelvec) = BETTER_default_channel(guild, UserId(802019556801511424_u64)).await {
+    if let Some(channelvec) = better_default_channel(guild, UserId(802019556801511424_u64)).await {
         println!("i");
         for channel in channelvec {
             println!("{}", channel.name);
@@ -205,7 +208,7 @@ async fn set_status(ctx: &Context) {
 struct General;
 
 #[group]
-#[commands(about, ping, die)] // status)]
+#[commands(about, ping, die, update)] // status)]
 struct Meta;
 
 #[group]
@@ -227,7 +230,7 @@ struct Settings;
 #[commands(remove, add)]
 struct Blacklist;
 
-#[hook]  // this appears not to work
+#[hook] // this appears not to work
 async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
     println!(
         "Got command '{}' by user '{}'",

@@ -17,42 +17,6 @@ use std::convert::TryInto;
 use std::process::exit;
 
 #[command]
-async fn delete(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
-    if msg.author.id.0 != 275384719024193538 {
-        return Ok(())
-    }
-    let mut data = ctx.data.write().await;
-    let mut dbcontext = data
-        .get_mut::<MyDbContext>()
-        .expect("Expected MyDbContext in TypeMap.");
-    let guild: u64 = match msg.guild_id {
-        Some(id) => id.0,
-        None => 0,
-    };
-    if dbcontext.drop_guild(&guild).await {
-        msg.channel_id.say(&ctx, "yeet").await;
-    } else {
-        msg.channel_id.say(&ctx, "sad").await;
-    }
-
-    Ok(())
-}
-
-#[command]
-async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
-    if msg.author.id.0 == 275384719024193538 {
-        msg.channel_id.say(&ctx.http, "ok bye").await?;
-        ctx.shard.shutdown_clean();
-        exit(0);
-    } else {
-        msg.channel_id
-            .say(&ctx.http, "shut up pleb you're dirt to me")
-            .await?;
-    }
-    Ok(())
-}
-
-#[command]
 async fn about(ctx: &Context, msg: &Message) -> CommandResult {
     let guild_count = ctx.cache.guild_count().await;
     msg.channel_id.send_message(&ctx, |m| m.embed(|e| {
@@ -562,7 +526,6 @@ async fn set(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         .get_mut::<MyDbContext>()
         .expect("Expected MyDbContext in TypeMap.");
 
-
     let g = &ctx.cache.guild(msg.guild_id.unwrap()).await.unwrap();
     let settings = dbcontext.get_settings(&g.id.0).await.expect("hmm");
 
@@ -768,7 +731,6 @@ async fn get_roll_from_set_command(ctx: &Context, msg: &Message, choice: &str) -
     )
 }
 
-
 #[command]
 async fn show(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     // redundant perm check is necessary cuz lib bypasses the perms when running a group default command
@@ -885,7 +847,6 @@ async fn show(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     Ok(())
 }
 
-
 enum PermissionLevel {
     CanPanic,
     CanChangeSettings,
@@ -899,7 +860,6 @@ async fn unauthorized(
     msg: &Message,
     perm_level: PermissionLevel,
 ) -> bool {
-
     let author = msg.author.id;
     let critical_roll = &match perm_level {
         PermissionLevel::CanPanic => RoleId(settings.roll_that_can_panic),
@@ -907,7 +867,7 @@ async fn unauthorized(
     };
     let is_admin = match guild.member_permissions(&ctx, author).await {
         Ok(p) => p.contains(Permissions::ADMINISTRATOR),
-        Err(_) => false
+        Err(_) => false,
     };
 
     return if settings.roll_that_can_panic == 0 || !guild.roles.contains_key(critical_roll) {
@@ -926,7 +886,8 @@ async fn unauthorized(
         .get(&author)
         .unwrap()
         .roles
-        .contains(critical_roll) || is_admin
+        .contains(critical_roll)
+        || is_admin
     {
         false
     } else {
@@ -939,9 +900,8 @@ async fn unauthorized(
                                          },
         )).await;
         true
-    }
+    };
 }
-
 
 /// Retrieves the nth `char` of a `&str`
 /// If `n < 0` then it will always retrieve the final `char`
