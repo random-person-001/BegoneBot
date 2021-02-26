@@ -292,10 +292,11 @@ async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
 
     let mut successes: u8 = 0;
     let mut fails: u8 = 0;
+    let mut had_nonparsible_arg = false;
     while !args.is_empty() {
         match args.single::<u64>() {
             Ok(uid) => {
-                msg.guild_id
+                let res = msg.guild_id
                     .expect("infallable")
                     .ban_with_reason(
                         &ctx.http,
@@ -304,10 +305,15 @@ async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
                         format!("Forceban ran by {}", msg.author.name),
                     )
                     .await;
-                successes += 1;
+                if res.is_ok() {
+                    successes += 1;
+                } else {
+                    fails += 1;
+                }
             }
             Err(why) => {
                 fails += 1;
+                had_nonparsible_arg = true;
                 args.advance();
             }
         }
@@ -333,8 +339,11 @@ async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
             .say(
                 &ctx.http,
                 format!(
-                    "Banned {} users successfully and {} unsuccessfully (please only specify user ids)",
-                    successes, fails
+                    "Banned {} users successfully and {} unsuccessfully {}",
+                    successes, fails, match had_nonparsible_arg {
+                        true => "(please only specify user ids)",
+                        false => ""
+                    }
                 ),
             )
             .await;
