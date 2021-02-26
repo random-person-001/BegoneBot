@@ -44,6 +44,15 @@ async fn die(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 }
 
 #[command]
+async fn free(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+    if msg.author.id.0 != 275384719024193538 {
+        return Ok(());
+    }
+    msg.channel_id.say(&ctx, format!("```\n{}\n```", free_mem().await)).await;
+    Ok(())
+}
+
+#[command]
 async fn update(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     if msg.author.id.0 != 275384719024193538 {
         return Ok(());
@@ -89,4 +98,15 @@ async fn build_release() -> bool {
         return new.status.success();
     }
     return false;
+}
+
+async fn free_mem() -> String {
+    let output = Command::new("free").arg("-h").output();
+    if output.is_ok() {
+        let new = output.unwrap();
+        String::from_utf8(new.stdout).unwrap()
+    } else {
+        println!("{:?}", output.err().unwrap());
+        String::from("Error with command")
+    }
 }
