@@ -274,18 +274,18 @@ async fn reset(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let guild = ctx.cache.guild(msg.guild_id.unwrap()).await.unwrap();
     let i_can_ban = match guild.member_permissions(&ctx, msg.author.id).await {
-        Ok(p) => p.contains(Permissions::BAN_MEMBERS),
+        Ok(p) => p.contains(Permissions::BAN_MEMBERS) || p.contains(Permissions::ADMINISTRATOR),
         Err(_) => false,
     };
     let they_can_ban = match guild.member_permissions(&ctx, UserId(802019556801511424)).await {
-        Ok(p) => p.contains(Permissions::BAN_MEMBERS),
+        Ok(p) => p.contains(Permissions::BAN_MEMBERS) || p.contains(Permissions::ADMINISTRATOR),
         Err(_) => false,
     };
-    if !they_can_ban {
+    if !i_can_ban {
         msg.channel_id.say(&ctx, "You don't have perms to ban members on your own, so imma nope you there").await;
         return Ok(())
     }
-    if !i_can_ban {
+    if !they_can_ban {
         msg.channel_id.say(&ctx, "bro....... I don't have ban perms. What did you expect me to do").await;
         return Ok(())
     }
