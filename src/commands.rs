@@ -16,6 +16,7 @@ use serenity::{
 use std::convert::TryInto;
 use std::process::exit;
 use serenity::model::guild::Region::UsEast;
+use regex::Regex;
 
 #[command]
 async fn about(ctx: &Context, msg: &Message) -> CommandResult {
@@ -27,7 +28,7 @@ async fn about(ctx: &Context, msg: &Message) -> CommandResult {
 
         I'm completely free and will never have any paywalled features. However, if you appreciate my service, you can consider donating in the support server to keep me running.
 
-        Pro tip: instead of writing out settings or blacklist, you can shorten them to s and bl respectively.\
+        Pro tip: instead of writing out settings or blacklist, you can shorten them to s and bl respectively. I am also case insensitive toward everything, including my prefix.\
         ",
         guild_count));
         e.field("Links","[Support server](https://discord.gg/eGNDZGdtaR)  |  [invite me](https://discordapp.com/oauth2/authorize?client_id=802019556801511424&scope=bot&permissions=268716070)", false);
@@ -77,8 +78,16 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args: Args) -> CommandResu
                 e.field("Simple name blacklist",
                 format!("(will match username exactly)\n`{:?}`", settings.blacklist.simplename),
                 false);
+                let str_regexes = {
+                    let temp: String = settings.blacklist.regexname.clone().into_iter().map(|s| format!("```{}```\n", s)).collect();
+                    if temp.is_empty() {
+                        "[no entries]".to_string()
+                    } else {
+                        temp
+                    }
+                };
                 e.field("Regex name blacklist",
-                format!("(will match username by regex)\n`{:?}`", settings.blacklist.regexname),
+                format!("(will match username by regex)\n{:}", str_regexes),
                 false);
                 e.field("Avatar hash blacklist",
                 format!("(will match an avatar's hash, which is unique to a profile picture. Due to technical limitations, from here you can't see the pictures they're referring to, but you could try searching them in chat)\n`{:?}`", settings.blacklist.avatar),
@@ -107,9 +116,9 @@ async fn add(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let mut s = settings.blacklist.clone();
 
-    if args.len() != 2 {
+    if args.len() < 2 {
         println!("{:?}", args);
-        msg.channel_id.say(&ctx.http, "I need exactly two things specified after this: which list you're adding to (one of `name`, `regexname`, or `avatar`), and the item to add.").await;
+        msg.channel_id.say(&ctx.http, "I need two things specified after this: which list you're adding to (one of `name`, `regexname`, or `avatar`), and the item to add.").await;
         return Ok(());
     }
 
@@ -117,7 +126,17 @@ async fn add(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let new_item = args.single::<String>().unwrap();
     match &*which_list {
         "name" => s.simplename.push(new_item),
-        "regexname" => s.regexname.push(new_item),
+        "regexname" => {
+            match Regex::new(&new_item) {
+                Ok(_) => s.regexname.push(new_item),
+                Err(e) => {
+                    println!("{:?}", e);
+                    msg.channel_id.say(&ctx.http, "Oofta. That looks like an invalid regex. This probably means there are excessive or insufficient backslashes.").await;
+                    return Ok(())
+                }
+            }
+
+        },
         "avatar" => {
             let uid: u64 = match new_item.parse() {
                 Ok(s) => s,
