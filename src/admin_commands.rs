@@ -8,6 +8,12 @@ use std::process::exit;
 use std::process::Command;
 
 #[command]
+async fn clean(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
+    msg.channel_id.say(&ctx, "Bailing out the problems from memory leaks is not yet implemented").await;
+    Ok(())
+}
+
+#[command]
 async fn delete(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
     if msg.author.id.0 != 275384719024193538 {
         return Ok(());
@@ -53,6 +59,21 @@ async fn free(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 }
 
 #[command]
+async fn git_push(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
+    if msg.author.id.0 != 275384719024193538 {
+        return Ok(());
+    }
+    msg.channel_id.say(&ctx, "Working....").await;
+
+    if !push().await {
+        msg.channel_id.say(&ctx, "Git push failed.").await;
+        return Ok(());
+    }
+    msg.channel_id.say(&ctx, "Git push success.").await;
+    Ok(())
+}
+
+#[command]
 async fn update(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     if msg.author.id.0 != 275384719024193538 {
         return Ok(());
@@ -83,6 +104,11 @@ async fn update(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         }
     }
     Ok(())
+}
+
+async fn push() -> bool {
+    let output = Command::new("git").arg("push").output();
+    return output.is_ok() && output.unwrap().status.success();
 }
 
 async fn pull() -> bool {

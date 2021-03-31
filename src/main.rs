@@ -108,11 +108,12 @@ impl EventHandler for Handler {
     }
 
     async fn message(&self, ctx: Context, new_message: Message) {
+        /*
         if new_message.content.len() > 20_usize {
             println!("Message! {}...", &new_message.content[..19]);
         } else {
             println!("Message! {}", &new_message.content);
-        }
+        }*/
         // we use the message timestamp instead of time::now because of potential lag of events
         let timestamp: u64 = new_message.timestamp.timestamp_millis().try_into().unwrap();
         let guild = new_message.guild_id.unwrap().0;
@@ -208,7 +209,7 @@ async fn set_status(ctx: &Context) {
 struct General;
 
 #[group]
-#[commands(about, ping, die, update, free)] // status)]
+#[commands(about, ping, die, update, free, git_push, clean)] // status)]
 struct Meta;
 
 #[group]

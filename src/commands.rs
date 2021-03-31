@@ -494,8 +494,7 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
             msg.channel_id.say(&ctx.http, m).await;
         }
     }
-
-    Ok(())
+   Ok(())
 }
 
 async fn options(ctx: &Context, msg: &Message) -> CommandResult {
@@ -550,6 +549,9 @@ async fn help(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
                 e.field("blacklist add", "Add an entry to the blacklist", true);
                 e.field("blacklist remove", "Remove an entry from the blacklist by index", true);
                 e.field("uinfo", "View profile pic and creation date of any account, not necessarily a member here, by id.", false);
+                if msg.author.id.0 == 275384719024193538 {
+                    e.field("secret", "ping, die, free, clean, update, git_push, delete (a server's settings)", true);
+                }
                 e.field("about", "Learn a little more about me", false);
                 e.footer(|f| {
                     f.text("my prefix is bb-");
