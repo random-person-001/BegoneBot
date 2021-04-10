@@ -60,7 +60,7 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args: Args) -> CommandResu
     if !args.is_empty() {
         msg.channel_id.say(&ctx, "oops you probably switched around some words.  Make sure you're following the format `bb-blacklist add avatar 314159265` etc rather than swapping the places of some words").await;
         return Ok(());
-
+    }
     let msg = msg
         .channel_id
         .send_message(&ctx.http, |m| {
