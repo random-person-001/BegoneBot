@@ -80,13 +80,19 @@ impl EventHandler for Handler {
         } else {
             println!("Creating a new settings row for guild {}", id);
             dbcontext.add_guild(id).await; // also adds to cache
-            greet_new_guild(&ctx, &guild).await;
+            //greet_new_guild(&ctx, &guild).await;
         };
         set_status(&ctx).await;
     }
 
+    async fn channel_pins_update(&self, ctx: Context, _pins: ChannelPinsUpdateEvent) {
+        println!("yeet doing a garbage run");
+        garbage_collect(&ctx);
+        println!("done");
+    }
+
     async fn guild_member_addition(&self, ctx: Context, guild_id: GuildId, mut new_member: Member) {
-        println!("new member joined: {}", new_member.user.name);
+        println!("new member joined {}: {}", guild_id, new_member.user.name);
         {
             let mut data = ctx.data.write().await;
             let mut grammy = data
@@ -209,7 +215,7 @@ async fn set_status(ctx: &Context) {
 struct General;
 
 #[group]
-#[commands(about, ping, die, update, free, git_push, clean)] // status)]
+#[commands(about, ping, die, update, free, git_push, garbage)] // status)]
 struct Meta;
 
 #[group]
@@ -331,4 +337,61 @@ async fn main() {
     if let Err(why) = client.start().await {
         println!("Client error: {:?}", why);
     }
+}
+
+
+
+async fn garbage_collect(ctx: &Context) {
+    let now = autopanic::time_now();
+    let mut data = ctx.data.write().await;
+
+    let settings_map = &data
+        .get::<MyDbContext>()
+        .expect("Expected MyDbContext in TypeMap.").cache.clone();
+
+
+    let mut grammy = data
+        .get_mut::<autopanic::Gramma>()
+        .expect("Expected your momma in TypeMap.");
+
+    // iterate over gramma to get your mom for each guild
+    // each your mom will have a settings attached, as well as memory of joins and whatnot
+    // make and save a new list of just the joins that are currently relevant and discard the previous
+
+    for (k, v) in grammy.guild_mamas.iter_mut() {
+        if let Some(settings) = settings_map.get(&k) {
+
+            let max_age = settings.time;  // duration we keep join records, in seconds
+            let mut new_recent_users: HashMap<u64, u64> = HashMap::new();
+            for (timestamp, user) in v.recent_users.iter_mut() {  // timestamp joined , userid
+                if !autopanic::time_is_past(*timestamp, max_age as u64) {
+                    new_recent_users.insert(*timestamp, *user);
+                }
+            }
+            v.recent_users = new_recent_users;
+
+
+            let max_age = settings.mentiontime;
+            let mut new_userpings: HashMap<u64, (usize, u64)> = HashMap::new();
+            for (timestamp, user) in v.userpings.iter() {
+                if !autopanic::time_is_past(*timestamp, max_age as u64) {
+                    new_userpings.insert(*timestamp, *user);
+                }
+            }
+            v.userpings = new_userpings;
+
+
+
+            let mut new_rollpings: HashMap<u64, (usize, u64)> = HashMap::new();
+            for (timestamp, user) in v.rollpings.iter() {
+                if !autopanic::time_is_past(*timestamp, max_age as u64) {
+                    new_rollpings.insert(*timestamp, *user);
+                }
+            }
+            v.rollpings = new_rollpings;
+
+        }
+
+    }
+
 }

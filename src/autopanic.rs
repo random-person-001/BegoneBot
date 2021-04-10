@@ -32,6 +32,7 @@ use serenity::{
     prelude::Mentionable,
     utils::{content_safe, ContentSafeOptions},
 };
+use std::collections::hash_map::Drain;
 /*
 
 all times are stored as ms since unix epoch, as u64
@@ -50,7 +51,7 @@ some time after raid stops, turn panic mode off
 */
 
 pub async fn check_against_pings(ctx: &Context, mom: &mut YourMama, guild: u64) {
-    println!("I am totally checking for people pinging too much here");
+    //println!("{:?} {:?} I am totally checking for people pinging too much here", guild, ctx.author.id);
 }
 
 pub async fn check_against_blacklist(
@@ -58,7 +59,7 @@ pub async fn check_against_blacklist(
     mut member: serenity::model::guild::Member,
     guild: u64,
 ) {
-    println!("I am totally checking against the blacklist here");
+    //println!("I am totally checking against the blacklist here");
     let mut data = ctx.data.write().await;
     let dbcontext = data
         .get::<MyDbContext>()
@@ -179,7 +180,6 @@ pub async fn check_against_joins(ctx: &Context, guild: u64) {
     if !mom.panicking {
         start_panicking(&ctx, mom, &settings, guild, false).await;
     }
-    mom.panic_end = now as i64 + (max_time * 1000 * 4) as i64; // todo: note implementation here
 
     if mom.panicking {
         let g = GuildId(guild)
@@ -187,6 +187,7 @@ pub async fn check_against_joins(ctx: &Context, guild: u64) {
             .await
             .expect("it should be cached bruh");
         let user = UserId(*mom.recent_users.get(&latest_joiner_ts).expect("broski "));
+        mom.yeeted.push(user.0);
         let dms: Option<PrivateChannel> = match user.create_dm_channel(&ctx.http).await {
             Ok(channel) => Some(channel),
             Err(why) => {
@@ -256,18 +257,20 @@ pub(crate) async fn stop_panicking(
     mom.panicking = false;
     if settings.logs > 0 {
         match ChannelId(settings.logs)
-            .say(&ctx.http, "Panic mode has been deactivated")
+            .say(&ctx.http, format!("Panic mode has been deactivated. I brought justice upon {} users.  I'll try to list them, but if it's over 100ish then I'll probs run out of message length and fail:", mom.yeeted.len()))
             .await
         {
             Ok(_) => (),
             Err(why) => println!("error printing stuff: {}", why),
         }
+        ChannelId(settings.logs).say(&ctx, format!("{:?}", mom.yeeted)).await;  // todo: write ids of all mom.yeeted here
     }
     GuildId(guild_id)
         .edit(&ctx.http, |g| {
             g.verification_level(mom.normal_verification_level)
         })
         .await;
+    mom.yeeted = vec![];   // clear for next time
 }
 
 pub(crate) async fn start_panicking(
@@ -284,18 +287,6 @@ pub(crate) async fn start_panicking(
         None => println!("bruh problemssaoheunstahoesnuta"),
     }
 
-    if let Some(channel) = ctx.cache.guild_channel(guild_id).await {
-        if 0 < settings.notify && !manually_started {
-            let r = channel
-                .say(
-                    &ctx.http,
-                    format!("bruh <@&{}> we are under a tack", settings.notify),
-                )
-                .await;
-        } else {
-            channel.say(&ctx.http, "Bruh we are under a tack").await;
-        }
-    }
 
     let mut g = GuildId(guild_id);
     match g
@@ -304,9 +295,25 @@ pub(crate) async fn start_panicking(
         })
         .await
     {
-        Ok(_) => println!("set verification level of {} to High", g.0),
-        Err(why) => println!("Error setting verification level of {}: {}", g.0, why),
+        Ok(_) => println!("set verification level of {} to High", guild_id),
+        Err(why) => println!("Error setting verification level of {}: {}", guild_id, why),
     };
+
+
+    if settings.logs > 0 {
+        let msg = if 0 < settings.notify && !manually_started {
+            format!("bruh <@&{}> we are under a tack", settings.notify)
+        } else {
+            String::from("Bruh we are under a tack")
+        };
+        match ChannelId(settings.logs)
+            .say(&ctx.http, msg)
+            .await
+        {
+            Ok(_) => (),
+            Err(why) => println!("error printing stuff in guild {}: {}", guild_id, why),
+        }
+    }
 }
 
 /// Return ms since epoch
@@ -343,7 +350,7 @@ pub struct YourMama {
     pub userpings: HashMap<u64, (usize, u64)>, // timestamp, number of pings, user
     pub rollpings: HashMap<u64, (usize, u64)>, // timestamp, number of pings, user
     pub panicking: bool,
-    pub panic_end: i64,
+    pub yeeted: Vec<u64>,
     pub normal_verification_level: VerificationLevel,
 }
 
@@ -354,7 +361,7 @@ impl YourMama {
             userpings: HashMap::new(),
             rollpings: HashMap::new(),
             panicking: false,
-            panic_end: -1,
+            yeeted: vec![],
             normal_verification_level: VerificationLevel::Low,
         }
     }

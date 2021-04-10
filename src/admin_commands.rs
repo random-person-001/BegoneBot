@@ -6,10 +6,15 @@ use serenity::{
 };
 use std::process::exit;
 use std::process::Command;
+use crate::{Settings, autopanic, garbage_collect};
+use crate::autopanic::{time_now, YourMama};
+use std::collections::HashMap;
 
 #[command]
-async fn clean(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
-    msg.channel_id.say(&ctx, "Bailing out the problems from memory leaks is not yet implemented").await;
+async fn garbage(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
+    msg.channel_id.say(&ctx, "Collecting garbage...").await;
+    garbage_collect(&ctx);
+    msg.channel_id.say(&ctx, "Done").await;
     Ok(())
 }
 

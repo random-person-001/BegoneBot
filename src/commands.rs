@@ -57,6 +57,10 @@ async fn blacklist_show(ctx: &Context, msg: &Message, args: Args) -> CommandResu
         return Ok(());
     }
 
+    if !args.is_empty() {
+        msg.channel_id.say(&ctx, "oops you probably switched around some words.  Make sure you're following the format `bb-blacklist add avatar 314159265` etc rather than swapping the places of some words").await;
+        return Ok(());
+
     let msg = msg
         .channel_id
         .send_message(&ctx.http, |m| {
@@ -370,9 +374,10 @@ async fn forceban(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult
     Ok(())
 }
 
-#[command]
+#[command()]
+#[aliases("userinfo")]
 /// Query discord for all the info we can find about a given user, specified by id
-async fn uinfo(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
+pub async fn uinfo(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let user_id = UserId(match args.clone().single::<u64>() {
         Ok(n) => n,
         Err(why) => {
@@ -550,7 +555,7 @@ async fn help(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
                 e.field("blacklist remove", "Remove an entry from the blacklist by index", true);
                 e.field("uinfo", "View profile pic and creation date of any account, not necessarily a member here, by id.", false);
                 if msg.author.id.0 == 275384719024193538 {
-                    e.field("secret", "ping, die, free, clean, update, git_push, delete (a server's settings)", true);
+                    e.field("secret", "ping, die, free, garbage, update, git_push, delete (a server's settings)", true);
                 }
                 e.field("about", "Learn a little more about me", false);
                 e.footer(|f| {
@@ -796,6 +801,7 @@ async fn show(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 
     if !args.is_empty() {
         msg.channel_id.say(&ctx, "Hey looks like you put something after your command. Did you remember to include `set` after `bb-settings`?").await;
+        return Ok(());
     }
 
     msg.channel_id.send_message(&ctx.http, |m| m.embed(|e| {
