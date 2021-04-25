@@ -250,7 +250,7 @@ pub(crate) async fn stop_panicking(
     mom.panicking = false;
     if settings.logs > 0 {
         match ChannelId(settings.logs)
-            .say(&ctx.http, format!("Panic mode has been deactivated. I brought justice upon {} users.  I'll try to list them, but if it's over 100ish then I'll probs run out of message length and fail:", mom.yeeted.len()))
+            .say(&ctx.http, format!("Panic mode has been deactivated. I brought justice upon {} users.", mom.yeeted.len()))
             .await
         {
             Ok(_) => (),

@@ -273,27 +273,6 @@ impl MyDbContext {
         }
     }
 
-    pub async fn set_enabled(&mut self, guild: &u64, enabled: bool) -> bool {
-        match sqlx::query("UPDATE settings SET enabled = ?1 WHERE guild = ?2")
-            .bind(enabled as i32)
-            .bind(&guild)
-            .execute(&self.pool)
-            .await
-        {
-            Ok(_) => {
-                self.cache.get_mut(&guild).unwrap().enabled = enabled;
-                true
-            }
-            Err(why) => {
-                println!(
-                    "Something went wrong setting enabled of {}: {:?}",
-                    guild, why
-                );
-                false
-            }
-        }
-    }
-
     pub async fn save_blacklist(&mut self, guild: &u64, mut new_bl: Blacklist) -> bool {
         match sqlx::query("UPDATE settings SET blacklist = ?1 WHERE guild = ?2")
             .bind(new_bl.to_bytes())
@@ -326,6 +305,7 @@ impl MyDbContext {
             Ok(_) => {
                 let mut settings = self.cache.get_mut(guild).unwrap();
                 match key {
+                    "enabled" => settings.enabled = value != 0,
                     "users" => settings.users = value.try_into().unwrap(),
                     "time" => settings.time = value.try_into().unwrap(),
                     "action" => settings.action = value.try_into().unwrap(),
