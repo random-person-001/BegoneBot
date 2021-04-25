@@ -456,23 +456,16 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .expect("Expected your momma in TypeMap.")
         .get(&guild_id);
 
-    if args.is_empty() {
-        println!("Panic mode manually activated for server {}", guild_id);
-        mom.panicking = true;
-        msg.channel_id
-            .say(
-                &ctx.http,
-                "Panic mode has been activated. Turn it off with `bb-panic off`",
-            )
-            .await;
-        autopanic::start_panicking(&ctx, mom, &settings, guild_id, true).await;
-        return Ok(());
-    }
-
-    let choice = args.clone().single::<String>().unwrap().to_lowercase();
+    let choice = if args.is_empty() {String::from("on")} else {
+        args.clone().single::<String>().unwrap().to_lowercase()
+    };
     println!("'{}'", choice);
     match &choice[..] {
         "on" => {
+            if mom.panicking {
+                msg.channel_id.say(&ctx, "Panic mode is already activated. You can turn it off with `bb-panic off`").await;
+                return Ok(())
+            }
             println!("Panic mode manually activated for server {}", guild_id);
             mom.panicking = true;
             autopanic::start_panicking(&ctx, mom, &settings, guild_id, true).await;
@@ -484,6 +477,10 @@ async fn panic(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
                 .await;
         }
         "off" => {
+            if !mom.panicking {
+                msg.channel_id.say(&ctx, "Panic mode has already been deactivated.`").await;
+                return Ok(())
+            }
             println!("Panic mode manually deactivated for server {}", guild_id);
             mom.panicking = false;
             autopanic::stop_panicking(&ctx, mom, &settings, guild_id).await;
