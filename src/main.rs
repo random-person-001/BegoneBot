@@ -215,7 +215,7 @@ async fn set_status(ctx: &Context) {
 struct General;
 
 #[group]
-#[commands(about, ping, die, update, free, git_push, garbage)] // status)]
+#[commands(about, ping, die, update, free, git_push, garbage, foo)] // status)]
 struct Meta;
 
 #[group]

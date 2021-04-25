@@ -1,14 +1,11 @@
 use crate::db::MyDbContext;
-use serenity::{
-    framework::standard::{macros::command, Args, CommandResult},
-    model::prelude::Message,
-    prelude::Context,
-};
+use serenity::{framework::standard::{macros::command, Args, CommandResult}, model::prelude::Message, prelude::Context, http};
 use std::process::exit;
 use std::process::Command;
 use crate::{Settings, autopanic, garbage_collect};
 use crate::autopanic::{time_now, YourMama};
 use std::collections::HashMap;
+use std::borrow::Cow;
 
 #[command]
 async fn garbage(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
@@ -36,7 +33,22 @@ async fn delete(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
     } else {
         msg.channel_id.say(&ctx, "sad").await;
     }
+    Ok(())
+}
 
+
+#[command]
+async fn foo(ctx: &Context, msg: &Message, _: Args) -> CommandResult {
+    let bad_guys: Vec<u64> = vec![234,465346,46346346,234563463,23459845093840,94235029834509,98324,203948,70934,293485,93245];
+    let string = bad_guys.iter().fold(String::new(), |to_return, id| format!("{} {}", to_return, id));
+
+    let attachment = http::AttachmentType::Bytes {
+        filename: String::from("Raiders.txt"),
+        data: Cow::from(string.into_bytes())
+    };
+    msg.channel_id.send_files(&ctx, vec![attachment], |m| {
+        m.content("here's some files bruh")
+    }).await?;
     Ok(())
 }
 

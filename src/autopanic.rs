@@ -11,28 +11,21 @@ use serenity::model::channel::PrivateChannel;
 use serenity::model::event::EventType::GuildBanAdd;
 use serenity::model::guild::VerificationLevel;
 use serenity::model::id::{ChannelId, GuildId};
-use serenity::{
-    async_trait,
-    client::bridge::gateway::{ShardId, ShardManager},
-    framework::standard::{
-        buckets::{LimitedFor, RevertBucket},
-        help_commands,
-        macros::{check, command, group, help, hook},
-        Args, CommandGroup, CommandOptions, DispatchError, HelpOptions, Reason, StandardFramework,
-    },
-    http::Http,
-    model::{
-        channel::{Channel, GuildChannel, Message},
-        gateway::Ready,
-        guild::Guild,
-        id::UserId,
-        permissions::Permissions,
-        user::User,
-    },
-    prelude::Mentionable,
-    utils::{content_safe, ContentSafeOptions},
-};
+use serenity::{async_trait, client::bridge::gateway::{ShardId, ShardManager}, framework::standard::{
+    buckets::{LimitedFor, RevertBucket},
+    help_commands,
+    macros::{check, command, group, help, hook},
+    Args, CommandGroup, CommandOptions, DispatchError, HelpOptions, Reason, StandardFramework,
+}, http::Http, model::{
+    channel::{Channel, GuildChannel, Message},
+    gateway::Ready,
+    guild::Guild,
+    id::UserId,
+    permissions::Permissions,
+    user::User,
+}, prelude::Mentionable, utils::{content_safe, ContentSafeOptions}, http};
 use std::collections::hash_map::Drain;
+use std::borrow::Cow;
 /*
 
 all times are stored as ms since unix epoch, as u64
@@ -263,7 +256,19 @@ pub(crate) async fn stop_panicking(
             Ok(_) => (),
             Err(why) => println!("error printing stuff: {}", why),
         }
-        ChannelId(settings.logs).say(&ctx, format!("{:?}", mom.yeeted)).await;  // todo: write ids of all mom.yeeted here
+
+        if !mom.yeeted.is_empty() {
+            // Write the ids of the raiders in a file, and attach it in chat
+            let string = mom.yeeted.iter().fold(String::new(), |to_return, id| format!("{} {}", to_return, id));
+            let attachment = http::AttachmentType::Bytes {
+                filename: String::from("Raiders.txt"),
+                data: Cow::from(string.into_bytes())
+            };
+
+            ChannelId(settings.logs).send_files(&ctx, vec![attachment], |m| {
+                m.content("These are the raiders")
+            }).await;
+        }
     }
     GuildId(guild_id)
         .edit(&ctx.http, |g| {
